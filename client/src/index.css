@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --color-background: #0f172a;
+  --color-foreground: #e2e8f0;
+}
+
+body {
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  color: var(--color-foreground);
+  font-family: system-ui, -apple-system, sans-serif;
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Safe area insets for notched devices (iPhone X+) */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Touch optimizations */
+button,
+a {
+  touch-action: manipulation;
+}
+
+/* Pulse animation for the recording button */
+@keyframes ping-slow {
+  0% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  75%,
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+.animate-ping-slow {
+  animation: ping-slow 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Prevent text selection on interactive elements */
+button {
+  -webkit-user-select: none;
+  user-select: none;
+}
