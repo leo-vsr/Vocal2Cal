@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../lib/prisma";
-import { parseEventsFromText } from "../lib/mistral";
+import { parseEventsFromText } from "../lib/gemini";
 import { getValidAccessToken, getCalendarClient, ReauthRequiredError } from "../lib/google";
 
 const router = Router();
@@ -12,7 +12,8 @@ const DAILY_LIMIT = parseInt(process.env.DAILY_AI_LIMIT || "50", 10);
 // POST /api/parse-events — Parse text & create Google Calendar events
 router.post("/parse-events", requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
-  const { text } = req.body;
+  const { text, timezone } = req.body;
+  const tz = timezone || "Europe/Paris";
 
   if (!text || typeof text !== "string" || text.trim().length === 0) {
     res.status(400).json({ error: "Texte manquant" });
@@ -32,7 +33,7 @@ router.post("/parse-events", requireAuth, async (req: Request, res: Response) =>
     }
 
     // 1. Parse events with Gemini
-    const parsedEvents = await parseEventsFromText(text.trim());
+    const parsedEvents = await parseEventsFromText(text.trim(), tz);
 
     if (!Array.isArray(parsedEvents) || parsedEvents.length === 0) {
       res.status(422).json({ error: "Aucun événement détecté dans votre phrase" });
@@ -54,11 +55,11 @@ router.post("/parse-events", requireAuth, async (req: Request, res: Response) =>
           description: event.description || "",
           start: {
             dateTime: `${event.date}T${event.startTime}:00`,
-            timeZone: "Europe/Paris",
+            timeZone: tz,
           },
           end: {
             dateTime: `${event.date}T${event.endTime}:00`,
-            timeZone: "Europe/Paris",
+            timeZone: tz,
           },
         },
       });

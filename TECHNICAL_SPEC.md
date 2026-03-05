@@ -28,7 +28,7 @@ Google OAuth 2.0 via Passport.js: delegated auth with Google Calendar API scope.
 
 ## AI
 
-Gemini 1.5 Flash: multilingual NLP with native JSON output (`responseMimeType: "application/json"`).
+Gemini 2.5 Flash: multilingual NLP with native JSON output (`responseMimeType: "application/json"`).
 
 ## DevOps
 
@@ -53,7 +53,7 @@ Hosting: Vercel (serverless). Auto-deploy on push.
 
 ## AI Event Parsing
 
-- Gemini 1.5 Flash extracts structured events from natural language text
+- Gemini 2.5 extracts structured events from natural language text
 - Supports multiple events in a single phrase
 - Context-aware: injects current date, day of week, and time into the prompt
 - Handles relative dates: "tomorrow", "next Monday", "in 3 days"
@@ -66,7 +66,7 @@ Hosting: Vercel (serverless). Auto-deploy on push.
 - Automatic event creation on the user's primary calendar
 - OAuth token refresh handling (transparent re-auth if token expired)
 - Each created event includes a direct link to Google Calendar
-- Timezone: `Europe/Paris`
+- Timezone: automatically detected from the user's browser (`Intl.DateTimeFormat`), fallback to `Europe/Paris`
 
 ## Rate Limiting
 
@@ -104,7 +104,7 @@ Hosting: Vercel (serverless). Auto-deploy on push.
 2. Client sends `POST /api/parse-events` with transcript
 3. `requireAuth` middleware verifies session
 4. Daily AI usage limit checked against DB
-5. **Gemini 1.5 Flash** parses text → structured JSON events
+5. **Gemini 2.5 Flash** parses text → structured JSON events
 6. Google OAuth token refreshed if expired
 7. Events created via **Google Calendar API**
 8. Action saved to Supabase (`VoiceAction`)
@@ -197,4 +197,4 @@ All errors follow a uniform format: `{ error: string }`.
 - **Frontend dev**: owns `client/`. Consumes the API as documented above. No need to know about Gemini or Calendar internals.
 - **Backend dev**: owns `api/`. Implements the contracts from the Data Model and API sections. No need to know React or styling.
 - **DevOps**: owns `vercel.json` + environment variables + Supabase provisioning.
-- **AI / Prompt engineering**: owns the prompt in `lib/mistral.ts`. Can iterate independently as long as the `ParsedEvent` interface remains stable.
+- **AI / Prompt engineering**: owns the prompt in `lib/gemini.ts`. Can iterate independently as long as the `ParsedEvent` interface remains stable.

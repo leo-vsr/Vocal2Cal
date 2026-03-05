@@ -22,7 +22,7 @@ npm run dev
 - **Backend**: Node.js + Express + TypeScript + Prisma
 - **Database**: PostgreSQL (Supabase)
 - **Auth**: Google OAuth 2.0 (Passport.js)
-- **AI**: Gemini 1.5 Flash
+- **AI**: Gemini 2.5 Flash
 - **Hosting**: Vercel (serverless)
 
 ## Documentation

@@ -6,7 +6,7 @@ export interface ParsedEvent {
   description?: string;
 }
 
-export async function parseEventsFromText(text: string): Promise<ParsedEvent[]> {
+export async function parseEventsFromText(text: string, timezone?: string): Promise<ParsedEvent[]> {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY manquant");
   }
@@ -42,7 +42,7 @@ Règles :
 Réponds UNIQUEMENT avec le tableau JSON brut valide (guillemets doubles, pas de virgule trailing), sans markdown, sans backticks, sans explication. Exemple de format attendu :
 [{"title":"Coiffeur","date":"2026-03-06","startTime":"14:00","endTime":"15:00","description":""}]`;
 
-  const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,

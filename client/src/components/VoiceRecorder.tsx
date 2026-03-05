@@ -39,7 +39,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ text: transcript }),
+        body: JSON.stringify({ text: transcript, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       });
 
       const text = await response.text();

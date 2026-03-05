@@ -28,7 +28,7 @@ Google OAuth 2.0 via Passport.js : authentification déléguée avec scope Googl
 
 ## IA
 
-Gemini 1.5 Flash : NLP multilingue avec sortie JSON native (`responseMimeType: "application/json"`).
+Gemini 2.5 Flash : NLP multilingue avec sortie JSON native (`responseMimeType: "application/json"`).
 
 ## DevOps
 
@@ -53,7 +53,7 @@ Hébergement : Vercel (serverless). Déploiement automatique au push.
 
 ## Parsing IA des événements
 
-- Gemini 1.5 Flash extrait des événements structurés à partir de texte en langage naturel
+- Gemini 2.5 Flash extrait des événements structurés à partir de texte en langage naturel
 - Supporte plusieurs événements en une seule phrase
 - Contextualisé : injecte la date du jour, le jour de la semaine et l'heure dans le prompt
 - Gère les dates relatives : "demain", "lundi prochain", "dans 3 jours"
@@ -66,7 +66,7 @@ Hébergement : Vercel (serverless). Déploiement automatique au push.
 - Création automatique des événements sur le calendrier principal de l'utilisateur
 - Gestion du rafraîchissement du token OAuth (ré-auth transparente si expiré)
 - Chaque événement créé inclut un lien direct vers Google Calendar
-- Fuseau horaire : `Europe/Paris`
+- Fuseau horaire : détecté automatiquement depuis le navigateur de l'utilisateur (`Intl.DateTimeFormat`), fallback sur `Europe/Paris`
 
 ## Limitation d'usage
 
@@ -104,7 +104,7 @@ Hébergement : Vercel (serverless). Déploiement automatique au push.
 2. Le client envoie `POST /api/parse-events` avec la transcription
 3. Le middleware `requireAuth` vérifie la session
 4. La limite quotidienne d'utilisation IA est vérifiée en BDD
-5. **Gemini 1.5 Flash** analyse le texte → événements JSON structurés
+5. **Gemini 2.5 Flash** analyse le texte → événements JSON structurés
 6. Le token Google OAuth est rafraîchi si expiré
 7. Les événements sont créés via l'**API Google Calendar**
 8. L'action est sauvegardée dans Supabase (`VoiceAction`)
@@ -197,4 +197,4 @@ Toutes les erreurs suivent un format uniforme : `{ error: string }`.
 - **Dév frontend** : possède `client/`. Consomme l'API telle que documentée ci-dessus. Pas besoin de connaître Gemini ou les détails de Calendar.
 - **Dév backend** : possède `api/`. Implémente les contrats des sections Modèle de données et API. Pas besoin de connaître React ou le styling.
 - **DevOps** : possède `vercel.json` + variables d'environnement + provisionnement Supabase.
-- **IA / Prompt engineering** : possède le prompt dans `lib/mistral.ts`. Peut itérer indépendamment tant que l'interface `ParsedEvent` reste stable.
+- **IA / Prompt engineering** : possède le prompt dans `lib/gemini.ts`. Peut itérer indépendamment tant que l'interface `ParsedEvent` reste stable.
