@@ -1,113 +1,118 @@
-# Vocal2Cal v2
+# Vocal2Cal
 
-Planificateur vocal d'événements Google Agenda — Dictez vos événements en français et ils sont automatiquement ajoutés à votre agenda.
+Voice-powered Google Calendar event planner — Dictate your events in French and they are automatically added to your Google Calendar.
 
-## Stack technique
+## Tech Stack
 
-| Couche | Technologie |
+| Layer | Technology |
 | --- | --- |
 | **Frontend** | React 19 + TypeScript + Vite + TailwindCSS 4 |
 | **Backend** | Node.js + Express + TypeScript |
 | **ORM** | Prisma |
-| **Base de données** | PostgreSQL (Supabase) |
+| **Database** | PostgreSQL (Supabase) |
 | **Auth** | Google OAuth 2.0 (Passport.js) |
-| **IA** | Mistral AI (parsing des événements) |
-| **Hébergement** | Vercel |
+| **AI** | Gemini 1.5 Flash (event parsing) |
+| **Hosting** | Vercel (serverless) |
 
-## Structure du projet
+## Project Structure
 
 ```
-Vocal2Cal-v2/
-├── api/                    # Backend Express
+Vocal2Cal/
+├── api/                    # Express backend
 │   ├── prisma/
-│   │   └── schema.prisma   # Schéma de la BDD
+│   │   └── schema.prisma   # Database schema
 │   ├── src/
-│   │   ├── index.ts        # Point d'entrée Express
-│   │   ├── lib/            # Prisma, Mistral, Google Calendar
+│   │   ├── index.ts        # Express entry point
+│   │   ├── lib/            # Prisma, Gemini, Google Calendar helpers
 │   │   ├── middleware/      # Auth middleware
 │   │   └── routes/         # Auth & Events routes
+│   ├── vercel.ts           # Vercel serverless entry point
 │   └── package.json
-├── client/                 # Frontend React
-│   ├── public/             # Assets statiques (icons, manifest, sw)
+├── client/                 # React frontend
+│   ├── public/             # Static assets (icons, manifest, sw)
 │   ├── src/
-│   │   ├── App.tsx         # Composant principal
+│   │   ├── App.tsx         # Main component
 │   │   ├── components/     # EventCard, History, UsageBar, VoiceRecorder
 │   │   ├── hooks/          # useAuth, useSpeechRecognition
 │   │   └── types/          # TypeScript types
 │   └── package.json
-├── vercel.json             # Config Vercel
-└── package.json            # Scripts root
+├── vercel.json             # Vercel config
+└── package.json            # Root scripts
 ```
 
-## Installation
+## Getting Started
 
-### Prérequis
+### Prerequisites
 
 - Node.js 18+
-- Un projet Supabase (PostgreSQL)
-- Google Cloud Console : OAuth 2.0 Client ID avec Google Calendar API activée
-- Clé API Mistral
+- A Supabase project (PostgreSQL)
+- Google Cloud Console: OAuth 2.0 Client ID with Google Calendar API enabled
+- Gemini API key
 
-### 1. Cloner et installer
+### 1. Clone and install
 
 ```bash
-git clone https://github.com/leo-vsr/Vocal2Cal-v2.git
-cd Vocal2Cal-v2
+git clone https://github.com/leo-vsr/Vocal2Cal.git
+cd Vocal2Cal
 npm install
 ```
 
-### 2. Configurer les variables d'environnement
+### 2. Configure environment variables
 
-Copier le fichier d'exemple et remplir les valeurs :
+Copy the example file and fill in the values:
 
 ```bash
 cp api/.env.example api/.env
 ```
 
-Variables requises :
+Required variables:
 
 | Variable | Description |
 | --- | --- |
-| `DATABASE_URL` | URL PostgreSQL Supabase |
+| `DATABASE_URL` | Supabase PostgreSQL connection string |
 | `GOOGLE_CLIENT_ID` | Google OAuth Client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth Client Secret |
-| `GOOGLE_CALLBACK_URL` | Callback URL (`http://localhost:3001/api/auth/google/callback` en dev) |
-| `MISTRAL_API_KEY` | Clé API Mistral |
-| `SESSION_SECRET` | Secret pour les sessions Express |
-| `CLIENT_URL` | URL du front (`http://localhost:5173` en dev) |
+| `GOOGLE_CALLBACK_URL` | OAuth callback URL (`http://localhost:3001/api/auth/google/callback` for local dev) |
+| `GEMINI_API_KEY` | Gemini API key |
+| `GEMINI_MODEL` | Gemini model name (default: `gemini-1.5-flash`) |
+| `DAILY_AI_LIMIT` | Max AI calls per day across all users (default: `50`) |
+| `SESSION_SECRET` | Express session secret (min 32 characters) |
+| `CLIENT_URL` | Frontend URL (`http://localhost:5173` for local dev) |
 
-### 3. Initialiser la base de données
+### 3. Initialize the database
 
 ```bash
 cd api
 npx prisma db push
 ```
 
-### 4. Lancer en développement
+### 4. Run in development
 
 ```bash
-# Depuis la racine du projet
+# From the project root
 npm run dev
 ```
 
-Cela lance simultanément :
-- **API** : `http://localhost:3001`
-- **Client** : `http://localhost:5173`
+This starts both services concurrently:
+- **API**: `http://localhost:3001`
+- **Client**: `http://localhost:5173`
 
-Le Vite dev server proxy automatiquement les requêtes `/api/*` vers le backend.
+The Vite dev server automatically proxies `/api/*` requests to the backend.
 
-## Déploiement sur Vercel
+## Deploying to Vercel
 
-1. Pousser le repo sur GitHub
-2. Importer le projet dans Vercel
-3. Configurer les variables d'environnement dans les settings Vercel
-4. S'assurer que `GOOGLE_CALLBACK_URL` pointe vers le domaine Vercel
+1. Push the repo to GitHub
+2. Import the project in Vercel
+3. Add all environment variables in Vercel project settings
+4. Set `GOOGLE_CALLBACK_URL` and `CLIENT_URL` to your Vercel domain
+5. Add the Vercel domain to **Authorized JavaScript origins** and **Authorized redirect URIs** in Google Cloud Console
 
-## Fonctionnalités
+## Features
 
-- **Reconnaissance vocale** : Utilise la Web Speech API (Chrome/Edge)
-- **Parsing IA** : Mistral AI extrait les événements depuis du texte naturel en français
-- **Google Calendar** : Création automatique des événements avec gestion du refresh token
-- **Historique** : Stockage des actions vocales en BDD
-- **PWA** : Installable sur mobile avec Service Worker
-- **Responsive** : Optimisé mobile-first avec safe areas pour iPhone X+
+- **Voice recognition**: Uses the Web Speech API (Chrome/Edge)
+- **AI parsing**: Gemini 1.5 Flash extracts calendar events from natural language in French
+- **Google Calendar**: Automatic event creation with token refresh handling
+- **Daily usage limit**: Configurable global rate limit to control AI costs
+- **History**: Voice actions stored in database
+- **PWA**: Installable on mobile with Service Worker
+- **Responsive**: Mobile-first design with safe area support for iPhone X+
