@@ -42,7 +42,15 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
         body: JSON.stringify({ text: transcript }),
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        console.error("Réponse invalide du serveur:", text);
+        setApiError("Réponse invalide du serveur");
+        return;
+      }
 
       if (response.status === 401 && data.error === "SESSION_EXPIRED") {
         window.location.href = "/api/auth/google";
@@ -84,7 +92,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
           } ${!isSupported || isProcessing ? "opacity-50 cursor-not-allowed" : "cursor-pointer active:scale-95"}`}
           aria-label={
             isListening
-              ? "Arr\u00eater l'enregistrement"
+              ? "Arrêter l'enregistrement"
               : "Commencer l'enregistrement"
           }
         >
@@ -112,7 +120,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
       {/* Status Text */}
       <p className="text-sm text-slate-400">
         {!isSupported
-          ? "Navigateur non support\u00e9"
+          ? "Navigateur non supporté"
           : isListening
             ? "Parlez maintenant..."
             : isProcessing
@@ -180,7 +188,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
                         d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                       />
                     </svg>
-                    Cr\u00e9er les \u00e9v\u00e9nements
+                    Créer les événements
                   </>
                 )}
               </button>
@@ -236,8 +244,8 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
               />
             </svg>
             <p className="text-sm font-medium">
-              {createdEvents.length} \u00e9v\u00e9nement
-              {createdEvents.length > 1 ? "s" : ""} cr\u00e9\u00e9
+              {createdEvents.length} événement
+              {createdEvents.length > 1 ? "s" : ""} créé
               {createdEvents.length > 1 ? "s" : ""}
             </p>
           </div>

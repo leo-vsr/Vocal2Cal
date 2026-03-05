@@ -6,6 +6,9 @@ import { getValidAccessToken, getCalendarClient, ReauthRequiredError } from "../
 
 const router = Router();
 
+// Limite globale d'appels IA par jour (tous utilisateurs confondus)
+const DAILY_LIMIT = parseInt(process.env.DAILY_AI_LIMIT || "50", 10);
+
 // POST /api/parse-events — Parse text & create Google Calendar events
 router.post("/parse-events", requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
@@ -17,7 +20,18 @@ router.post("/parse-events", requireAuth, async (req: Request, res: Response) =>
   }
 
   try {
-    // 1. Parse events with Mistral
+    // 0. Check daily usage limit
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const todayUsage = await prisma.voiceAction.count({
+      where: { createdAt: { gte: startOfDay } },
+    });
+    if (todayUsage >= DAILY_LIMIT) {
+      res.status(429).json({ error: `Limite quotidienne atteinte (${DAILY_LIMIT} appels/jour). Réessayez demain.` });
+      return;
+    }
+
+    // 1. Parse events with Gemini
     const parsedEvents = await parseEventsFromText(text.trim());
 
     if (!Array.isArray(parsedEvents) || parsedEvents.length === 0) {
@@ -92,8 +106,6 @@ router.get("/history", requireAuth, async (req: Request, res: Response) => {
 
 // GET /api/usage — Fetch daily usage stats
 router.get("/usage", requireAuth, async (req: Request, res: Response) => {
-  const DAILY_LIMIT = 1500;
-
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
 

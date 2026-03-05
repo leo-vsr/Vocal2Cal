@@ -7,6 +7,10 @@ export interface ParsedEvent {
 }
 
 export async function parseEventsFromText(text: string): Promise<ParsedEvent[]> {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY manquant");
+  }
+
   const now = new Date();
   const today = now.toISOString().split("T")[0];
   const dayOfWeek = now.toLocaleDateString("fr-FR", { weekday: "long" });
@@ -35,36 +39,60 @@ Règles :
 - Si aucune date n'est précisée, utilise la date d'aujourd'hui
 - Si aucune heure n'est précisée, utilise 09:00 par défaut
 
-Réponds UNIQUEMENT avec le tableau JSON brut, sans markdown, sans backticks, sans explication.`;
+Réponds UNIQUEMENT avec le tableau JSON brut valide (guillemets doubles, pas de virgule trailing), sans markdown, sans backticks, sans explication. Exemple de format attendu :
+[{"title":"Coiffeur","date":"2026-03-06","startTime":"14:00","endTime":"15:00","description":""}]`;
 
-  const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.MISTRAL_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "mistral-small-latest",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.1,
-      max_tokens: 1024,
-    }),
-  });
+  const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 4096,
+          responseMimeType: "application/json",
+        },
+      }),
+    }
+  );
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Erreur Mistral API: ${err}`);
+    throw new Error(`Erreur Gemini API: ${err}`);
   }
 
   const data = await response.json();
   const responseText =
-    data.choices?.[0]?.message?.content?.trim() || "[]";
+    data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || "").join("")?.trim() ||
+    "[]";
 
-  // Clean potential markdown formatting
-  const cleaned = responseText
+  console.log("Gemini raw response:", responseText);
+
+  // Clean markdown fences if present
+  let cleaned = responseText
     .replace(/^```json?\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
+
+  // Extract JSON array
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
+  }
+
+  // Remove trailing commas before ] or }
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
 
   const events: ParsedEvent[] = JSON.parse(cleaned);
   return events;
