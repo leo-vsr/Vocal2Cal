@@ -1,111 +1,217 @@
 import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence, useInView } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useTransform, type MotionValue } from "framer-motion";
 import { EventCard } from "./EventCard";
 import type { CreatedEvent, VoiceAction } from "@/types";
 
-function getCardVariants(index: number) {
-  const isEven = index % 2 === 0;
-  return {
-    hidden: {
-      opacity: 0,
-      x: isEven ? -40 : 40,
-      scale: 0.92,
-      filter: "blur(4px)",
-    },
-    visible: {
-      opacity: 1,
-      x: 0,
-      scale: 1,
-      filter: "blur(0px)",
-      transition: {
-        duration: 0.5,
-        ease: [0.22, 1, 0.36, 1] as const,
-        delay: index * 0.12,
-      },
-    },
-  };
-}
+const CARD_WIDTH = 280;
+const CARD_GAP = 16;
 
-function TimelineItem({ action, index, total }: { action: VoiceAction; index: number; total: number }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-20px" });
-  const isLast = index === total - 1;
+function HistoryCarousel({ actions }: { actions: VoiceAction[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const dragX = useMotionValue(0);
+
+  const totalWidth = actions.length * (CARD_WIDTH + CARD_GAP) - CARD_GAP;
+
+  const handleDragEnd = (_: unknown, info: { offset: { x: number }; velocity: { x: number } }) => {
+    const threshold = CARD_WIDTH / 3;
+    const velocity = info.velocity.x;
+    const offset = info.offset.x;
+
+    let newIndex = activeIndex;
+    if (offset < -threshold || velocity < -200) {
+      newIndex = Math.min(activeIndex + 1, actions.length - 1);
+    } else if (offset > threshold || velocity > 200) {
+      newIndex = Math.max(activeIndex - 1, 0);
+    }
+    setActiveIndex(newIndex);
+  };
+
+  const goTo = (index: number) => setActiveIndex(index);
+
+  const animateX = -(activeIndex * (CARD_WIDTH + CARD_GAP));
 
   return (
-    <div ref={ref} className="relative flex gap-4">
-      {/* Timeline spine */}
-      <div className="flex flex-col items-center shrink-0 w-8">
-        {/* Dot */}
+    <div className="space-y-4">
+      {/* Carousel track */}
+      <div
+        ref={containerRef}
+        className="overflow-hidden -mx-1 px-1"
+      >
         <motion.div
-          initial={{ scale: 0, opacity: 0 }}
-          animate={isInView ? { scale: 1, opacity: 1 } : {}}
-          transition={{ type: "spring", stiffness: 500, damping: 25, delay: index * 0.12 }}
-          className="relative z-10 w-3 h-3 rounded-full bg-gradient-to-br from-blue-400 to-violet-400 shadow-[0_0_8px_rgba(99,102,241,0.4)] mt-1.5"
+          drag="x"
+          dragConstraints={{
+            left: -(totalWidth - CARD_WIDTH + 20),
+            right: 20,
+          }}
+          dragElastic={0.15}
+          onDragEnd={handleDragEnd}
+          animate={{ x: animateX }}
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          style={{ x: dragX }}
+          className="flex cursor-grab active:cursor-grabbing"
+          // Use gap via style to match CARD_GAP
         >
-          <motion.div
-            animate={{ scale: [1, 1.8, 1], opacity: [0.4, 0, 0.4] }}
-            transition={{ duration: 2.5, repeat: Infinity, delay: index * 0.3 }}
-            className="absolute inset-0 rounded-full bg-blue-400"
-          />
+          {actions.map((action, index) => (
+            <HistoryCard
+              key={action.id}
+              action={action}
+              index={index}
+              isActive={index === activeIndex}
+              dragX={dragX}
+              baseOffset={animateX}
+            />
+          ))}
         </motion.div>
-        {/* Connector line */}
-        {!isLast && (
-          <motion.div
-            initial={{ scaleY: 0, opacity: 0 }}
-            animate={isInView ? { scaleY: 1, opacity: 1 } : {}}
-            transition={{ duration: 0.5, ease: "easeOut", delay: index * 0.12 + 0.15 }}
-            className="w-px flex-1 origin-top bg-gradient-to-b from-blue-500/30 via-violet-500/15 to-transparent"
-          />
-        )}
       </div>
 
-      {/* Card */}
-      <motion.div
-        variants={getCardVariants(index)}
-        initial="hidden"
-        animate={isInView ? "visible" : "hidden"}
-        whileHover={{ y: -3, transition: { type: "spring", stiffness: 400, damping: 20 } }}
-        className="flex-1 glass rounded-2xl p-4 mb-4"
-      >
-        {/* Header: quote + time */}
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <p className="text-slate-300 text-sm italic leading-relaxed flex-1 min-w-0">
-            &ldquo;{action.rawText}&rdquo;
-          </p>
-          <motion.time
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={isInView ? { opacity: 1, scale: 1 } : {}}
-            transition={{ delay: index * 0.12 + 0.25 }}
-            className="text-slate-500 text-[10px] uppercase tracking-wider shrink-0 bg-white/5 px-2 py-0.5 rounded-full"
+      {/* Pagination dots + nav */}
+      {actions.length > 1 && (
+        <div className="flex items-center justify-center gap-3">
+          {/* Prev arrow */}
+          <motion.button
+            onClick={() => goTo(Math.max(0, activeIndex - 1))}
+            whileHover={{ scale: 1.15 }}
+            whileTap={{ scale: 0.9 }}
+            className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+              activeIndex === 0
+                ? "text-slate-700 cursor-default"
+                : "text-slate-400 hover:text-white bg-white/5 hover:bg-white/10"
+            }`}
+            disabled={activeIndex === 0}
           >
-            {new Date(action.createdAt).toLocaleDateString("fr-FR", {
-              day: "numeric",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </motion.time>
-        </div>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </motion.button>
 
-        {/* Events inside */}
-        <div className="space-y-1">
-          {(action.events as CreatedEvent[]).map((event, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: -12 }}
-              animate={isInView ? { opacity: 1, x: 0 } : {}}
-              transition={{
-                duration: 0.35,
-                ease: "easeOut" as const,
-                delay: index * 0.12 + 0.3 + i * 0.08,
-              }}
-            >
-              <EventCard event={event} compact />
-            </motion.div>
-          ))}
+          {/* Dots */}
+          <div className="flex items-center gap-1.5">
+            {actions.map((_, i) => (
+              <motion.button
+                key={i}
+                onClick={() => goTo(i)}
+                animate={{
+                  width: i === activeIndex ? 20 : 6,
+                  backgroundColor: i === activeIndex ? "rgb(96, 165, 250)" : "rgba(255,255,255,0.15)",
+                }}
+                whileHover={{ scale: 1.3 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                className="h-1.5 rounded-full"
+              />
+            ))}
+          </div>
+
+          {/* Next arrow */}
+          <motion.button
+            onClick={() => goTo(Math.min(actions.length - 1, activeIndex + 1))}
+            whileHover={{ scale: 1.15 }}
+            whileTap={{ scale: 0.9 }}
+            className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+              activeIndex === actions.length - 1
+                ? "text-slate-700 cursor-default"
+                : "text-slate-400 hover:text-white bg-white/5 hover:bg-white/10"
+            }`}
+            disabled={activeIndex === actions.length - 1}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </motion.button>
         </div>
-      </motion.div>
+      )}
     </div>
+  );
+}
+
+function HistoryCard({
+  action,
+  index,
+  isActive,
+  dragX,
+  baseOffset,
+}: {
+  action: VoiceAction;
+  index: number;
+  isActive: boolean;
+  dragX: MotionValue<number>;
+  baseOffset: number;
+}) {
+  const cardCenter = index * (CARD_WIDTH + CARD_GAP) + CARD_WIDTH / 2;
+
+  const distance = useTransform(dragX, (latestX: number) => {
+    const currentPos = latestX + baseOffset;
+    return Math.abs(cardCenter + currentPos - CARD_WIDTH / 2);
+  });
+
+  const scale = useTransform(distance, [0, CARD_WIDTH], [1, 0.92]);
+  const opacity = useTransform(distance, [0, CARD_WIDTH * 1.5], [1, 0.5]);
+
+  return (
+    <motion.div
+      style={{
+        width: CARD_WIDTH,
+        minWidth: CARD_WIDTH,
+        marginRight: CARD_GAP,
+        scale,
+        opacity,
+      }}
+      initial={{ opacity: 0, y: 30, scale: 0.9 }}
+      animate={{ opacity: 1, y: 0, scale: isActive ? 1 : 0.92 }}
+      transition={{
+        delay: index * 0.08,
+        duration: 0.45,
+        ease: [0.22, 1, 0.36, 1] as const,
+      }}
+      className="glass rounded-2xl p-5 flex flex-col pointer-events-none select-none"
+    >
+      {/* Time badge */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500/20 to-violet-500/15 flex items-center justify-center">
+          <svg className="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <time className="text-slate-500 text-[10px] uppercase tracking-wider">
+          {new Date(action.createdAt).toLocaleDateString("fr-FR", {
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </time>
+      </div>
+
+      {/* Voice transcript */}
+      <p className="text-slate-300 text-sm italic leading-relaxed mb-4 line-clamp-2">
+        &ldquo;{action.rawText}&rdquo;
+      </p>
+
+      {/* Divider */}
+      <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mb-3" />
+
+      {/* Events */}
+      <div className="space-y-1.5 flex-1">
+        {(action.events as CreatedEvent[]).map((event, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: index * 0.08 + 0.3 + i * 0.06, duration: 0.3, ease: "easeOut" }}
+          >
+            <EventCard event={event} compact />
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Event count pill */}
+      <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-1.5">
+        <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
+        <span className="text-slate-500 text-[11px]">
+          {(action.events as CreatedEvent[]).length} événement{(action.events as CreatedEvent[]).length > 1 ? "s" : ""} créé{(action.events as CreatedEvent[]).length > 1 ? "s" : ""}
+        </span>
+      </div>
+    </motion.div>
   );
 }
 
@@ -203,7 +309,7 @@ export function History() {
             transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as const }}
             className="overflow-hidden"
           >
-            <div className="mt-5 pl-1">
+            <div className="mt-5">
               {isLoading ? (
                 <motion.div
                   initial={{ opacity: 0 }}
@@ -236,16 +342,7 @@ export function History() {
                   <p className="text-slate-600 text-xs mt-1">Vos futures dictées apparaîtront ici</p>
                 </motion.div>
               ) : (
-                <div>
-                  {actions.map((action, index) => (
-                    <TimelineItem
-                      key={action.id}
-                      action={action}
-                      index={index}
-                      total={actions.length}
-                    />
-                  ))}
-                </div>
+                <HistoryCarousel actions={actions} />
               )}
             </div>
           </motion.div>
