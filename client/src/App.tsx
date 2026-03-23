@@ -294,17 +294,21 @@ export default function App() {
                 <UsageBar refreshKey={usageRefresh} />
               </motion.div>
 
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.6, duration: 0.4 }}
-                className="w-full pt-2"
-              >
-                <History />
-              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* History — full-width section outside the narrow container */}
+        {user && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6, duration: 0.4 }}
+            className="w-full mt-6 sm:mt-10"
+          >
+            <History />
+          </motion.div>
+        )}
       </main>
 
       {/* Footer */}
