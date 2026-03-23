@@ -10,7 +10,56 @@ function formatDate(dateStr: string) {
   });
 }
 
-export function EventCard({ event }: { event: CreatedEvent }) {
+function formatDateShort(dateStr: string) {
+  const date = new Date(dateStr + "T00:00:00");
+  return date.toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+interface EventCardProps {
+  event: CreatedEvent;
+  compact?: boolean;
+}
+
+export function EventCard({ event, compact = false }: EventCardProps) {
+  if (compact) {
+    return (
+      <motion.div
+        whileHover={{ x: 3, backgroundColor: "rgba(255,255,255,0.04)" }}
+        transition={{ type: "spring", stiffness: 400, damping: 25 }}
+        className="flex items-center gap-3 rounded-lg px-3 py-2 group"
+      >
+        <div className="shrink-0 w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/10 flex items-center justify-center">
+          <svg className="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-white text-sm font-medium truncate">{event.title}</p>
+          <p className="text-slate-500 text-xs">
+            {formatDateShort(event.date)} &middot; {event.startTime} - {event.endTime}
+          </p>
+        </div>
+        {event.htmlLink && (
+          <motion.a
+            href={event.htmlLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            whileHover={{ scale: 1.15 }}
+            whileTap={{ scale: 0.9 }}
+            className="shrink-0 text-slate-600 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </motion.a>
+        )}
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.07)" }}
