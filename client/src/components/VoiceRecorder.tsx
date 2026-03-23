@@ -103,13 +103,36 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
   return (
     <div className="flex flex-col items-center gap-6 w-full">
       {/* Microphone Button */}
-      <div className="relative flex items-center justify-center">
+      <motion.div
+        className="relative flex items-center justify-center w-40 h-40 sm:w-48 sm:h-48"
+        animate={{
+          y: isListening ? [0, -8, 0] : [0, -10, 0],
+          rotate: isListening ? [0, 1.5, -1.5, 0] : [0, 2, -2, 0],
+        }}
+        transition={{
+          duration: isListening ? 3.6 : 5.2,
+          repeat: Infinity,
+          ease: "easeInOut",
+        }}
+      >
         {/* Ambient glow behind button */}
-        <div className={`absolute w-40 h-40 sm:w-48 sm:h-48 rounded-full transition-all duration-700 ${
-          isListening
-            ? "bg-red-500/10 blur-3xl scale-110"
-            : "bg-blue-500/8 blur-2xl"
-        }`} />
+        <div
+          className={`absolute w-40 h-40 sm:w-48 sm:h-48 rounded-full transition-all duration-700 ${
+            isListening
+              ? "bg-red-500/10 blur-3xl scale-110"
+              : "bg-blue-500/8 blur-2xl"
+          }`}
+        />
+        <motion.div
+          className="absolute top-5 left-7 h-24 w-24 rounded-full bg-blue-400/18 blur-2xl sm:h-28 sm:w-28"
+          animate={{ scale: [1, 1.08, 1], opacity: [0.6, 1, 0.6] }}
+          transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <motion.div
+          className="absolute bottom-6 right-5 h-20 w-20 rounded-full bg-white/40 blur-xl sm:h-24 sm:w-24"
+          animate={{ scale: [1.04, 0.94, 1.04], x: [0, 8, 0] }}
+          transition={{ duration: 4.1, repeat: Infinity, ease: "easeInOut" }}
+        />
         <AnimatePresence>
           {isListening && (
             <>
@@ -118,14 +141,14 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
                 initial={{ scale: 1, opacity: 0.4 }}
                 animate={{ scale: 1.8, opacity: 0 }}
                 transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
-                className="absolute inset-0 rounded-full bg-blue-500/20"
+                className="absolute inset-6 rounded-full bg-blue-500/20"
               />
               <motion.div
                 key="glow"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: [0.1, 0.25, 0.1] }}
                 transition={{ duration: 2, repeat: Infinity }}
-                className="absolute -inset-3 rounded-full bg-blue-500/10"
+                className="absolute inset-3 rounded-full bg-blue-500/10"
               />
             </>
           )}
@@ -133,18 +156,18 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
         <motion.button
           onClick={handleToggleRecording}
           disabled={isDisabled}
-          whileHover={!isDisabled ? { scale: 1.08 } : undefined}
+          whileHover={!isDisabled ? { scale: 1.08, y: -8, rotate: -1.5 } : undefined}
           whileTap={!isDisabled ? { scale: 0.92 } : undefined}
           animate={
             isListening
               ? { backgroundColor: "#ef4444", scale: 1.1, boxShadow: "0 0 30px rgba(239,68,68,0.3)" }
               : { backgroundColor: "#3b82f6", scale: 1, boxShadow: "0 0 20px rgba(59,130,246,0.3)" }
           }
-          transition={{ type: "spring", stiffness: 300, damping: 20 }}
-          className={`relative z-10 w-24 h-24 sm:w-28 sm:h-28 rounded-full flex items-center justify-center ${
+          transition={{ type: "spring", stiffness: 260, damping: 18 }}
+          className={`relative z-10 flex h-24 w-24 items-center justify-center rounded-full sm:h-28 sm:w-28 ${
             isListening ? "glow-red" : "glow-blue"
           } ${
-            isDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+            isDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
           }`}
           aria-label={
             isListening
@@ -160,7 +183,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
                 animate={{ scale: 1, rotate: 0 }}
                 exit={{ scale: 0, rotate: 90 }}
                 transition={{ duration: 0.25 }}
-                className="w-10 h-10 text-white"
+                className="h-10 w-10 text-white"
                 fill="currentColor"
                 viewBox="0 0 24 24"
               >
@@ -173,7 +196,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
                 animate={{ scale: 1, rotate: 0 }}
                 exit={{ scale: 0, rotate: -90 }}
                 transition={{ duration: 0.25 }}
-                className="w-10 h-10 text-white"
+                className="h-10 w-10 text-white"
                 fill="currentColor"
                 viewBox="0 0 24 24"
               >
@@ -183,7 +206,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
             )}
           </AnimatePresence>
         </motion.button>
-      </div>
+      </motion.div>
 
       {/* Status Text */}
       <AnimatePresence mode="wait">

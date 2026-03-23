@@ -1,143 +1,307 @@
-import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence, useScroll, useTransform, useInView, type MotionValue } from "framer-motion";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { EventCard } from "./EventCard";
 import type { CreatedEvent, VoiceAction } from "@/types";
 
-function ParallaxCard({ action, index }: { action: VoiceAction; index: number }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-50px" });
+const popProfiles = [
+  {
+    hidden: {
+      opacity: 0,
+      x: -120,
+      y: 18,
+      rotate: -8,
+      rotateY: 110,
+      transformPerspective: 1000,
+      scale: 0.84,
+    },
+    visible: {
+      opacity: 1,
+      x: 0,
+      y: 0,
+      rotate: 0,
+      rotateY: 0,
+      transformPerspective: 1000,
+      scale: 1,
+    },
+    hover: { x: 4, y: -6, scale: 1.02 },
+    transition: { type: "spring" as const, stiffness: 220, damping: 17 },
+  },
+  {
+    hidden: {
+      opacity: 0,
+      y: 82,
+      scale: 0.34,
+      rotate: -12,
+      filter: "blur(16px)",
+    },
+    visible: {
+      opacity: 1,
+      y: 0,
+      scale: 1,
+      rotate: 0,
+      filter: "blur(0px)",
+    },
+    hover: { y: -10, scale: 1.04 },
+    transition: { duration: 0.62, ease: [0.16, 1, 0.3, 1] as const },
+  },
+  {
+    hidden: {
+      opacity: 0,
+      x: 120,
+      y: -10,
+      rotate: 10,
+      rotateY: -110,
+      transformPerspective: 1000,
+      scale: 0.86,
+    },
+    visible: {
+      opacity: 1,
+      x: 0,
+      y: 0,
+      rotate: 0,
+      rotateY: 0,
+      transformPerspective: 1000,
+      scale: 1,
+    },
+    hover: { x: -4, y: -7, rotate: 1 },
+    transition: { type: "spring" as const, stiffness: 200, damping: 16 },
+  },
+  {
+    hidden: {
+      opacity: 0,
+      y: 110,
+      scaleX: 0.94,
+      scaleY: 0.18,
+      rotate: 8,
+      filter: "blur(10px)",
+    },
+    visible: {
+      opacity: 1,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotate: 0,
+      filter: "blur(0px)",
+    },
+    hover: { y: -9, scale: 1.03, rotate: 1.2 },
+    transition: { type: "spring" as const, stiffness: 180, damping: 15 },
+  },
+  {
+    hidden: {
+      opacity: 0,
+      x: 130,
+      y: 90,
+      scale: 0.68,
+      rotate: 18,
+      clipPath: "inset(35% 20% 35% 20% round 24px)",
+      filter: "blur(14px)",
+    },
+    visible: {
+      opacity: 1,
+      x: 0,
+      y: 0,
+      scale: 1,
+      rotate: 0,
+      clipPath: "inset(0% 0% 0% 0% round 24px)",
+      filter: "blur(0px)",
+    },
+    hover: { x: 3, y: -8, scale: 1.025 },
+    transition: { duration: 0.56, ease: [0.22, 1, 0.36, 1] as const },
+  },
+  {
+    hidden: {
+      opacity: 0,
+      x: -95,
+      y: 70,
+      rotate: -16,
+      scale: 0.76,
+      filter: "blur(12px)",
+    },
+    visible: {
+      opacity: 1,
+      x: 0,
+      y: 0,
+      rotate: 0,
+      scale: 1,
+      filter: "blur(0px)",
+    },
+    hover: { y: -8, rotate: -1, scale: 1.03 },
+    transition: { type: "spring" as const, stiffness: 190, damping: 16 },
+  },
+];
 
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ["start end", "end start"],
-  });
+const gridVariants = {
+  hidden: {},
+  visible: {
+    transition: {
+      delayChildren: 0.08,
+      staggerChildren: 0.1,
+    },
+  },
+};
 
-  const parallaxY = useTransform(
-    scrollYProgress,
-    [0, 1],
-    [index % 2 === 0 ? 30 : 50, index % 2 === 0 ? -30 : -50]
-  );
-  const parallaxRotate = useTransform(
-    scrollYProgress,
-    [0, 0.5, 1],
-    [index % 2 === 0 ? 1 : -1, 0, index % 2 === 0 ? -0.5 : 0.5]
-  );
-  const parallaxScale = useTransform(scrollYProgress, [0, 0.4, 0.6, 1], [0.95, 1, 1, 0.97]);
+const cardVariants = {
+  hidden: (index: number) => popProfiles[index % popProfiles.length].hidden,
+  visible: (index: number) => {
+    const profile = popProfiles[index % popProfiles.length];
 
-  const eventsCount = (action.events as CreatedEvent[]).length;
+    return {
+      ...profile.visible,
+      transition: {
+        ...profile.transition,
+        delay: 0.14 + index * 0.1,
+      },
+    };
+  },
+  hover: (index: number) => popProfiles[index % popProfiles.length].hover,
+};
+
+const cardContentVariants = {
+  hidden: {},
+  visible: (index: number) => ({
+    transition: {
+      delayChildren: 0.08 + (index % 3) * 0.03,
+      staggerChildren: 0.05,
+    },
+  }),
+  hover: {
+    transition: {
+      staggerChildren: 0.018,
+    },
+  },
+};
+
+const cardSectionVariants = {
+  hidden: (index: number) => ({
+    opacity: 0,
+    y: 10 + (index % 2) * 6,
+    x: index % 2 === 0 ? -8 : 8,
+    scale: 0.94,
+    filter: "blur(4px)",
+  }),
+  visible: {
+    opacity: 1,
+    y: 0,
+    x: 0,
+    scale: 1,
+    filter: "blur(0px)",
+    transition: {
+      duration: 0.34,
+      ease: [0.22, 1, 0.36, 1] as const,
+    },
+  },
+  hover: (index: number) => ({
+    y: index % 2 === 0 ? -1.5 : 1.5,
+    rotate: index % 2 === 0 ? -0.8 : 0.8,
+    transition: {
+      duration: 0.18,
+    },
+  }),
+};
+
+const eventListVariants = {
+  hidden: {},
+  visible: {
+    transition: {
+      delayChildren: 0.04,
+      staggerChildren: 0.035,
+    },
+  },
+  hover: {
+    transition: {
+      staggerChildren: 0.012,
+    },
+  },
+};
+
+function HistoryCard({ action, index }: { action: VoiceAction; index: number }) {
+  const events = action.events as CreatedEvent[];
 
   return (
-    <motion.div
-      ref={ref}
-      style={{ y: parallaxY, rotate: parallaxRotate, scale: parallaxScale }}
-      initial={{ opacity: 0, y: 40, filter: "blur(6px)" }}
-      animate={isInView ? { opacity: 1, y: 0, filter: "blur(0px)" } : {}}
-      transition={{
-        duration: 0.6,
-        ease: [0.22, 1, 0.36, 1] as const,
-        delay: index * 0.1,
-      }}
-      whileHover={{ y: -4, transition: { type: "spring", stiffness: 300, damping: 20 } }}
+    <motion.article
       className="glass rounded-2xl p-5 h-full flex flex-col"
+      custom={index}
+      variants={cardVariants}
+      initial="hidden"
+      animate="visible"
+      whileHover="hover"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500/20 to-violet-500/15 border border-white/5 flex items-center justify-center">
-            <svg className="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-            </svg>
+      <motion.div custom={index} variants={cardContentVariants} className="flex h-full flex-col">
+        <motion.div
+          custom={index}
+          variants={cardSectionVariants}
+          className="mb-4 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/5 bg-gradient-to-br from-blue-500/20 to-violet-500/15">
+              <svg className="h-3.5 w-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
+              </svg>
+            </div>
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+              {new Date(action.createdAt).toLocaleDateString("fr-FR", {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
           </div>
-          <span className="text-slate-500 text-[10px] uppercase tracking-wider">
-            {new Date(action.createdAt).toLocaleDateString("fr-FR", {
-              day: "numeric",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 bg-green-500/10 px-2 py-0.5 rounded-full">
-          <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
-          <span className="text-green-400/80 text-[10px] font-medium">
-            {eventsCount} evt
-          </span>
-        </div>
-      </div>
+          <div className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-2 py-0.5">
+            <div className="h-1.5 w-1.5 rounded-full bg-green-400" />
+            <span className="text-[10px] font-medium text-green-400/80">
+              {events.length} evt
+            </span>
+          </div>
+        </motion.div>
 
-      {/* Transcript */}
-      <p className="text-slate-300 text-sm italic leading-relaxed mb-4">
-        &ldquo;{action.rawText}&rdquo;
-      </p>
+        <motion.p
+          custom={index + 1}
+          variants={cardSectionVariants}
+          className="mb-4 text-sm italic leading-relaxed text-slate-300"
+        >
+          &ldquo;{action.rawText}&rdquo;
+        </motion.p>
 
-      {/* Gradient divider */}
-      <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mb-4" />
+        <motion.div
+          custom={index + 2}
+          variants={cardSectionVariants}
+          className="mb-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"
+        />
 
-      {/* Events */}
-      <div className="space-y-1.5 flex-1">
-        {(action.events as CreatedEvent[]).map((event, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0, x: index % 2 === 0 ? -15 : 15 }}
-            animate={isInView ? { opacity: 1, x: 0 } : {}}
-            transition={{
-              duration: 0.4,
-              ease: "easeOut" as const,
-              delay: index * 0.1 + 0.2 + i * 0.07,
-            }}
-          >
-            <EventCard event={event} compact />
-          </motion.div>
-        ))}
-      </div>
-    </motion.div>
+        <motion.div variants={eventListVariants} className="flex-1 space-y-1.5">
+          {events.map((event, eventIndex) => (
+            <motion.div
+              key={`${action.id}-${eventIndex}`}
+              custom={eventIndex}
+              variants={cardSectionVariants}
+            >
+              <EventCard event={event} compact />
+            </motion.div>
+          ))}
+        </motion.div>
+      </motion.div>
+    </motion.article>
   );
-}
-
-function ParallaxOrb({ className, progress, speed }: {
-  className: string;
-  progress: MotionValue<number>;
-  speed: number;
-}) {
-  const y = useTransform(progress, [0, 1], [0, speed]);
-  return <motion.div style={{ y }} className={className} />;
 }
 
 function HistoryGrid({ actions }: { actions: VoiceAction[] }) {
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: sectionRef,
-    offset: ["start end", "end start"],
-  });
-
   return (
-    <div ref={sectionRef} className="relative">
-      {/* Parallax background decorations */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <ParallaxOrb
-          progress={scrollYProgress}
-          speed={-80}
-          className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-blue-500/[0.04] blur-3xl"
-        />
-        <ParallaxOrb
-          progress={scrollYProgress}
-          speed={-120}
-          className="absolute top-1/3 -right-16 w-60 h-60 rounded-full bg-violet-500/[0.04] blur-3xl"
-        />
-        <ParallaxOrb
-          progress={scrollYProgress}
-          speed={-50}
-          className="absolute bottom-0 left-1/4 w-40 h-40 rounded-full bg-cyan-500/[0.03] blur-2xl"
-        />
-      </div>
-
-      {/* Grid of cards */}
-      <div className="relative grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-        {actions.map((action, index) => (
-          <ParallaxCard key={action.id} action={action} index={index} />
-        ))}
-      </div>
-    </div>
+    <motion.div
+      className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5"
+      variants={gridVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      {actions.map((action, index) => (
+        <HistoryCard key={action.id} action={action} index={index} />
+      ))}
+    </motion.div>
   );
 }
 
@@ -169,7 +333,6 @@ export function History() {
 
   return (
     <div className="w-full max-w-3xl mx-auto px-2">
-      {/* Toggle button */}
       <motion.button
         onClick={() => setIsOpen(!isOpen)}
         whileHover={{ scale: 1.01 }}
@@ -207,7 +370,6 @@ export function History() {
         </motion.div>
       </motion.button>
 
-      {/* Content */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
