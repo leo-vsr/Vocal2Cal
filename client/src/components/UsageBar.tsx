@@ -1,8 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { motion, useMotionValue, useSpring, useTransform, useInView } from "framer-motion";
 import type { UsageData } from "@/types";
 
 export function UsageBar({ refreshKey }: { refreshKey?: number }) {
   const [usage, setUsage] = useState<UsageData | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const isInView = useInView(ref, { once: true, margin: "-40px" });
+
+  const motionWidth = useMotionValue(0);
+  const springWidth = useSpring(motionWidth, { stiffness: 80, damping: 20 });
+  const widthPercent = useTransform(springWidth, (v) => `${v}%`);
 
   useEffect(() => {
     fetch("/api/usage", { credentials: "include" })
@@ -12,6 +19,13 @@ export function UsageBar({ refreshKey }: { refreshKey?: number }) {
       })
       .catch(() => {});
   }, [refreshKey]);
+
+  useEffect(() => {
+    if (usage && isInView) {
+      const pct = Math.min((usage.used / usage.limit) * 100, 100);
+      motionWidth.set(pct);
+    }
+  }, [usage, isInView, motionWidth]);
 
   if (!usage) return null;
 
@@ -25,7 +39,13 @@ export function UsageBar({ refreshKey }: { refreshKey?: number }) {
         : "bg-blue-500";
 
   return (
-    <div className="w-full max-w-md space-y-1.5">
+    <motion.div
+      ref={ref}
+      initial={{ opacity: 0, y: 10 }}
+      animate={isInView ? { opacity: 1, y: 0 } : {}}
+      transition={{ duration: 0.4, ease: "easeOut" }}
+      className="w-full max-w-md space-y-1.5"
+    >
       <div className="flex justify-between items-center text-xs text-slate-500">
         <span>Appels aujourd&apos;hui</span>
         <span>
@@ -33,11 +53,11 @@ export function UsageBar({ refreshKey }: { refreshKey?: number }) {
         </span>
       </div>
       <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${pct}%` }}
+        <motion.div
+          className={`h-full rounded-full ${barColor}`}
+          style={{ width: widthPercent }}
         />
       </div>
-    </div>
+    </motion.div>
   );
 }

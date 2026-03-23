@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import type { CreatedEvent } from "@/types";
 
 function formatDate(dateStr: string) {
@@ -11,7 +12,12 @@ function formatDate(dateStr: string) {
 
 export function EventCard({ event }: { event: CreatedEvent }) {
   return (
-    <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-4 hover:bg-white/[0.07] transition-colors">
+    <motion.div
+      whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.07)" }}
+      whileTap={{ scale: 0.98 }}
+      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+      className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-4"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <h3 className="text-white font-semibold text-base truncate">
@@ -44,10 +50,12 @@ export function EventCard({ event }: { event: CreatedEvent }) {
         </div>
 
         {event.htmlLink && (
-          <a
+          <motion.a
             href={event.htmlLink}
             target="_blank"
             rel="noopener noreferrer"
+            whileHover={{ scale: 1.2, rotate: -8 }}
+            whileTap={{ scale: 0.9 }}
             className="shrink-0 text-blue-400 hover:text-blue-300 transition-colors"
             title="Voir dans Google Agenda"
           >
@@ -64,9 +72,9 @@ export function EventCard({ event }: { event: CreatedEvent }) {
                 d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
               />
             </svg>
-          </a>
+          </motion.a>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
