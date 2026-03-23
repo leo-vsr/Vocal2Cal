@@ -1,16 +1,62 @@
 @import "tailwindcss";
 
 :root {
-  --color-background: #0f172a;
+  --color-background: #0a0f1e;
   --color-foreground: #e2e8f0;
 }
 
 body {
-  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  background: var(--color-background);
   color: var(--color-foreground);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
   min-height: 100dvh;
   -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+
+/* Ambient background with subtle gradient orbs */
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 0%, rgba(56, 109, 241, 0.08) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 40% at 80% 80%, rgba(99, 60, 255, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 10% 60%, rgba(56, 189, 248, 0.05) 0%, transparent 60%),
+    linear-gradient(180deg, #0a0f1e 0%, #111827 50%, #0a0f1e 100%);
+  pointer-events: none;
+}
+
+/* Subtle dot grid overlay */
+.app-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+}
+
+/* Glass card */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Safe area insets for notched devices (iPhone X+) */
@@ -33,25 +79,26 @@ a {
   touch-action: manipulation;
 }
 
-/* Pulse animation for the recording button */
-@keyframes ping-slow {
-  0% {
-    transform: scale(1);
-    opacity: 0.4;
-  }
-  75%,
-  100% {
-    transform: scale(1.8);
-    opacity: 0;
-  }
-}
-
-.animate-ping-slow {
-  animation: ping-slow 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-
 /* Prevent text selection on interactive elements */
 button {
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Glow utilities */
+.glow-blue {
+  box-shadow:
+    0 0 20px rgba(59, 130, 246, 0.15),
+    0 0 60px rgba(59, 130, 246, 0.05);
+}
+
+.glow-red {
+  box-shadow:
+    0 0 20px rgba(239, 68, 68, 0.2),
+    0 0 60px rgba(239, 68, 68, 0.05);
 }

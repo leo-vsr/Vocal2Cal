@@ -103,7 +103,13 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
   return (
     <div className="flex flex-col items-center gap-6 w-full">
       {/* Microphone Button */}
-      <div className="relative">
+      <div className="relative flex items-center justify-center">
+        {/* Ambient glow behind button */}
+        <div className={`absolute w-40 h-40 sm:w-48 sm:h-48 rounded-full transition-all duration-700 ${
+          isListening
+            ? "bg-red-500/10 blur-3xl scale-110"
+            : "bg-blue-500/8 blur-2xl"
+        }`} />
         <AnimatePresence>
           {isListening && (
             <>
@@ -135,7 +141,9 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
               : { backgroundColor: "#3b82f6", scale: 1, boxShadow: "0 0 20px rgba(59,130,246,0.3)" }
           }
           transition={{ type: "spring", stiffness: 300, damping: 20 }}
-          className={`relative z-10 w-24 h-24 sm:w-28 sm:h-28 rounded-full flex items-center justify-center shadow-lg ${
+          className={`relative z-10 w-24 h-24 sm:w-28 sm:h-28 rounded-full flex items-center justify-center ${
+            isListening ? "glow-red" : "glow-blue"
+          } ${
             isDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
           }`}
           aria-label={
@@ -207,7 +215,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
             initial="hidden"
             animate="visible"
             exit="exit"
-            className="w-full max-w-md bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-red-400 text-sm text-center"
+            className="w-full max-w-md glass rounded-2xl p-4 border-red-500/15 text-red-400 text-sm text-center"
           >
             {speechError}
           </motion.div>
@@ -222,7 +230,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
             initial="hidden"
             animate="visible"
             exit="exit"
-            className="w-full max-w-md bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-4"
+            className="w-full max-w-md glass-strong rounded-2xl p-5"
           >
             <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">
               Transcription
@@ -243,7 +251,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
                     disabled={isProcessing}
                     whileHover={!isProcessing ? { scale: 1.02 } : undefined}
                     whileTap={!isProcessing ? { scale: 0.98 } : undefined}
-                    className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2"
+                    className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
                   >
                     {isProcessing ? (
                       <>
@@ -326,7 +334,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
             initial="hidden"
             animate="visible"
             exit="exit"
-            className="w-full max-w-md bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-red-400 text-sm text-center"
+            className="w-full max-w-md glass rounded-2xl p-4 border-red-500/15 text-red-400 text-sm text-center"
           >
             {apiError}
           </motion.div>
