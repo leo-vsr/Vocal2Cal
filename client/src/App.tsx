@@ -44,9 +44,17 @@ const dashboardSteps = [
 
 type AppView = "home" | "dashboard";
 
-const viewTabs: Array<{ id: AppView; label: string }> = [
-  { id: "home", label: "Accueil" },
-  { id: "dashboard", label: "Dashboard" },
+const viewTabs: Array<{ id: AppView; label: string; icon: string }> = [
+  {
+    id: "home",
+    label: "Accueil",
+    icon: "M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  },
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    icon: "M3 13h8V3H3v10zm10 8h8V3h-8v18zm-10 0h8v-6H3v6z",
+  },
 ];
 
 const pageVariants = {
@@ -163,7 +171,7 @@ export default function App() {
       </motion.header>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col items-center px-4 py-6 sm:px-6 sm:py-10 md:py-14">
+      <main className={`flex-1 flex flex-col items-center px-4 py-6 sm:px-6 sm:py-10 md:py-14 ${user ? "pb-28 sm:pb-10 md:pb-14" : ""}`}>
         <AnimatePresence mode="wait">
           {status === "loading" ? (
             <motion.div
@@ -325,7 +333,7 @@ export default function App() {
               >
                 <motion.div
                   variants={fadeUp}
-                  className="glass-strong inline-flex items-center gap-1 rounded-full border border-white/8 p-1"
+                  className="glass-strong hidden items-center gap-1 rounded-full border border-white/8 p-1 sm:inline-flex"
                 >
                   {viewTabs.map((tab) => {
                     const isActive = activeView === tab.id;
@@ -558,6 +566,45 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+
+      {user && (
+        <motion.nav
+          initial={{ opacity: 0, y: 28 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.35, ease: smoothEase }}
+          className="fixed inset-x-0 bottom-4 z-50 px-4 sm:hidden"
+        >
+          <div className="glass-strong mx-auto flex max-w-sm items-center gap-1 rounded-[26px] border border-white/10 p-1.5 shadow-[0_18px_60px_rgba(6,10,20,0.35)] backdrop-blur-xl">
+            {viewTabs.map((tab) => {
+              const isActive = activeView === tab.id;
+
+              return (
+                <motion.button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveView(tab.id)}
+                  whileTap={{ scale: 0.97 }}
+                  className={`relative flex flex-1 flex-col items-center justify-center gap-1 rounded-[20px] px-3 py-3 text-[11px] font-medium transition-colors ${
+                    isActive ? "text-white" : "text-slate-400"
+                  }`}
+                >
+                  {isActive && (
+                    <motion.span
+                      layoutId="mobile-active-view-pill"
+                      className="absolute inset-0 rounded-[20px] bg-white/10"
+                      transition={{ type: "spring", stiffness: 360, damping: 28 }}
+                    />
+                  )}
+                  <svg className="relative z-10 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={tab.icon} />
+                  </svg>
+                  <span className="relative z-10">{tab.label}</span>
+                </motion.button>
+              );
+            })}
+          </div>
+        </motion.nav>
+      )}
 
       {/* Footer */}
       <motion.footer
