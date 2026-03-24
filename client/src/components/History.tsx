@@ -312,6 +312,7 @@ export function History() {
   const [overflowHidden, setOverflowHidden] = useState(true);
   const isOpenRef = useRef(isOpen);
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     isOpenRef.current = isOpen;
@@ -345,16 +346,11 @@ export function History() {
   }, []);
 
   const handleToggle = () => {
-    const opening = !isOpen;
-    setIsOpen(opening);
-    if (opening) {
-      timerRef.current = setTimeout(() => {
-        containerRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-        });
-      }, 50);
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
+    setIsOpen(!isOpen);
   };
 
   return (
@@ -405,11 +401,20 @@ export function History() {
             transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as const }}
             onAnimationStart={() => setOverflowHidden(true)}
             onAnimationComplete={() => {
-              if (isOpenRef.current) setOverflowHidden(false);
+              if (!isOpenRef.current) return;
+
+              setOverflowHidden(false);
+              timerRef.current = setTimeout(() => {
+                contentRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                });
+                timerRef.current = null;
+              }, 60);
             }}
             className={overflowHidden ? "overflow-hidden" : ""}
           >
-            <div className="mt-6">
+            <div ref={contentRef} className="mt-6">
               {isLoading ? (
                 <motion.div
                   initial={{ opacity: 0 }}
