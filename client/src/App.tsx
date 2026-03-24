@@ -377,54 +377,54 @@ export default function App() {
               initial="hidden"
               animate="visible"
               exit="exit"
-              className="relative flex w-full max-w-6xl flex-1 items-center justify-center overflow-hidden py-6 text-center sm:py-10"
+              className="relative flex w-full max-w-5xl flex-1 items-center justify-center overflow-hidden py-2 sm:py-8"
             >
               <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 <motion.div
-                  animate={{ x: [0, 36, -24, 0], y: [0, -26, 22, 0], scale: [1, 1.08, 0.94, 1] }}
+                  animate={{ x: [0, 22, -12, 0], y: [0, -18, 10, 0], scale: [1, 1.05, 0.96, 1] }}
+                  transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
+                  className="absolute left-[-25%] top-10 h-56 w-56 rounded-full bg-cyan-400/18 blur-[90px] sm:left-[-10%] sm:h-72 sm:w-72"
+                />
+                <motion.div
+                  animate={{ x: [0, -24, 12, 0], y: [0, 14, -18, 0], scale: [1, 0.96, 1.08, 1] }}
                   transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute left-[-10%] top-12 h-64 w-64 rounded-full bg-cyan-400/20 blur-[110px] sm:h-80 sm:w-80"
+                  className="absolute bottom-10 right-[-22%] h-64 w-64 rounded-full bg-fuchsia-500/14 blur-[100px] sm:right-[-6%] sm:top-20 sm:bottom-auto sm:h-[22rem] sm:w-[22rem]"
                 />
                 <motion.div
-                  animate={{ x: [0, -42, 18, 0], y: [0, 18, -30, 0], scale: [1, 0.95, 1.1, 1] }}
-                  transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute right-[-6%] top-20 h-72 w-72 rounded-full bg-fuchsia-500/16 blur-[120px] sm:h-[26rem] sm:w-[26rem]"
+                  animate={{ opacity: [0.12, 0.3, 0.12] }}
+                  transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+                  className="absolute inset-x-6 top-28 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent sm:top-1/2"
                 />
-                <motion.div
-                  animate={{ opacity: [0.18, 0.32, 0.16, 0.18] }}
-                  transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute inset-x-0 top-1/2 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"
-                />
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.18),rgba(2,6,23,0.04))]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_35%),linear-gradient(180deg,rgba(15,23,42,0.16),rgba(2,6,23,0.05))]" />
               </div>
 
-              <div className="relative z-10 grid w-full items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-12">
+              <div className="relative z-10 flex w-full flex-col gap-6 text-center sm:gap-8 lg:grid lg:grid-cols-[minmax(0,0.94fr)_minmax(0,1.06fr)] lg:items-center lg:gap-10 lg:text-left">
                 <motion.section
                   variants={staggerContainer}
                   initial="hidden"
                   animate="visible"
-                  className="relative mx-auto flex w-full max-w-xl flex-col items-center text-center lg:items-start lg:text-left"
+                  className="relative mx-auto flex w-full max-w-sm flex-col items-center sm:max-w-md lg:max-w-xl lg:items-start"
                 >
                   <motion.div
                     variants={fadeUp}
-                    className="glass inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-slate-950/55 px-4 py-2 text-[11px] uppercase tracking-[0.28em] text-cyan-200"
+                    className="glass inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-slate-950/55 px-3 py-2 text-[10px] uppercase tracking-[0.28em] text-cyan-200 sm:px-4 sm:text-[11px]"
                   >
                     <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_18px_rgba(103,232,249,0.9)]" />
-                    Calendrier piloté par la voix
+                    Connexion Google en un tap
                   </motion.div>
 
                   <motion.h2
                     variants={fadeUp}
-                    className="mt-5 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl lg:text-6xl"
+                    className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-white sm:mt-5 sm:text-5xl lg:text-6xl"
                   >
-                    Votre agenda passe de l&apos;id&eacute;e &agrave; l&apos;action,
+                    Organisez vos rendez-vous
                     <span className="mt-2 block bg-gradient-to-r from-cyan-300 via-blue-300 to-fuchsia-300 bg-clip-text text-transparent">
                       {typedText}
                       {typedText.length < "à la voix".length && (
                         <motion.span
                           animate={{ opacity: [1, 0] }}
                           transition={{ duration: 0.55, repeat: Infinity, repeatType: "reverse" }}
-                          className="ml-1 inline-block h-10 w-0.5 align-middle bg-cyan-300"
+                          className="ml-1 inline-block h-9 w-0.5 align-middle bg-cyan-300 sm:h-10"
                         />
                       )}
                     </span>
@@ -432,28 +432,28 @@ export default function App() {
 
                   <motion.p
                     variants={fadeUp}
-                    className="mt-5 max-w-lg text-base leading-8 text-slate-300 sm:text-lg"
+                    className="mt-4 max-w-md text-sm leading-7 text-slate-300 sm:text-base sm:leading-8"
                   >
-                    Dictez vos &eacute;v&eacute;nements en fran&ccedil;ais, laissez Vocal2Cal
-                    comprendre l&apos;intention, puis envoyez le tout directement dans votre
-                    Google Agenda avec une interface plus vivante que votre todo-list.
+                    Dites une phrase simple, laissez Vocal2Cal comprendre la date,
+                    l&apos;heure et le contexte, puis ajoutez l&apos;&eacute;v&eacute;nement dans
+                    Google Agenda sans formulaire.
                   </motion.p>
 
                   <motion.div
                     variants={fadeUp}
-                    className="mt-8 flex w-full max-w-md flex-wrap items-center justify-center gap-3 lg:justify-start"
+                    className="mt-6 w-full"
                   >
                     <motion.button
                       onClick={signIn}
-                      whileHover={{ y: -3, scale: 1.015, boxShadow: "0 20px 60px rgba(34,211,238,0.18)" }}
+                      whileHover={{ y: -2, scale: 1.01, boxShadow: "0 18px 50px rgba(34,211,238,0.14)" }}
                       whileTap={{ scale: 0.985 }}
-                      className="group relative inline-flex min-h-14 flex-1 items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-white px-6 py-4 text-base font-semibold text-slate-900 shadow-[0_12px_40px_rgba(255,255,255,0.08)] sm:flex-none sm:min-w-[18rem]"
+                      className="group relative flex min-h-15 w-full items-center justify-center overflow-hidden rounded-[26px] border border-white/15 bg-white px-5 py-4 text-base font-semibold text-slate-900 shadow-[0_16px_45px_rgba(255,255,255,0.08)]"
                     >
                       <motion.span
                         aria-hidden="true"
-                        animate={{ x: ["-140%", "160%"] }}
-                        transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut", repeatDelay: 0.6 }}
-                        className="absolute inset-y-0 w-20 bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent blur-md"
+                        animate={{ x: ["-150%", "170%"] }}
+                        transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut", repeatDelay: 0.7 }}
+                        className="absolute inset-y-0 w-24 bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent blur-md"
                       />
                       <span className="relative z-10 flex items-center gap-3">
                         <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
@@ -478,30 +478,35 @@ export default function App() {
                       </span>
                     </motion.button>
 
-                    <motion.div
-                      whileHover={{ y: -2 }}
-                      className="glass inline-flex min-h-14 items-center rounded-2xl border border-white/10 px-5 py-3 text-sm text-slate-200"
+                    <motion.p
+                      variants={fadeUp}
+                      className="mt-3 text-xs leading-6 text-slate-400"
                     >
-                      Dites simplement : &quot;R&eacute;union jeudi 14h&quot;
-                    </motion.div>
+                      Connexion directe avec votre compte Google. Aucun mot de passe &agrave; g&eacute;rer ici.
+                    </motion.p>
                   </motion.div>
 
                   <motion.div
                     variants={staggerContainer}
                     initial="hidden"
                     animate="visible"
-                    className="mt-8 grid w-full gap-3 sm:grid-cols-3"
+                    className="mt-6 grid w-full gap-3"
                   >
                     {landingSignals.map((signal, index) => (
                       <motion.div
                         key={signal.value}
                         variants={fadeUp}
-                        whileHover={{ y: -4, scale: 1.01 }}
+                        whileHover={{ y: -3, scale: 1.01 }}
                         transition={{ duration: 0.22, delay: index * 0.04 }}
-                        className="glass rounded-[24px] border border-white/10 bg-slate-950/35 p-4 text-left"
+                        className="glass flex items-center justify-between rounded-[22px] border border-white/10 bg-slate-950/35 p-4 text-left"
                       >
-                        <p className="text-sm uppercase tracking-[0.22em] text-cyan-200">{signal.value}</p>
-                        <p className="mt-2 text-sm leading-6 text-slate-400">{signal.label}</p>
+                        <div className="pr-4">
+                          <p className="text-sm uppercase tracking-[0.22em] text-cyan-200">{signal.value}</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-400">{signal.label}</p>
+                        </div>
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-cyan-200">
+                          {index + 1}
+                        </div>
                       </motion.div>
                     ))}
                   </motion.div>
@@ -511,90 +516,103 @@ export default function App() {
                   variants={staggerContainer}
                   initial="hidden"
                   animate="visible"
-                  className="relative mx-auto w-full max-w-xl"
+                  className="relative mx-auto w-full max-w-sm sm:max-w-md lg:max-w-xl"
                 >
                   <motion.div
                     variants={fadeUp}
-                    className="relative overflow-hidden rounded-[32px] border border-white/10 bg-slate-950/55 p-5 shadow-[0_30px_90px_rgba(5,10,20,0.45)] backdrop-blur-2xl sm:p-6"
+                    className="relative overflow-hidden rounded-[30px] border border-white/10 bg-slate-950/60 p-4 shadow-[0_28px_80px_rgba(5,10,20,0.42)] backdrop-blur-2xl sm:p-6"
                   >
                     <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(34,211,238,0.08),transparent_45%,rgba(232,121,249,0.08))]" />
-                    <div className="relative flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Studio vocal</p>
-                        <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">Parlez, voyez, validez.</h3>
+                    <div className="relative">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="text-left">
+                          <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Aperçu mobile</p>
+                          <h3 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">
+                            Une landing pensée pour le téléphone.
+                          </h3>
+                        </div>
+                        <motion.div
+                          animate={{ rotate: [0, 10, -8, 0], scale: [1, 1.04, 1] }}
+                          transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+                          className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs font-medium text-cyan-200"
+                        >
+                          Mobile first
+                        </motion.div>
                       </div>
-                      <motion.div
-                        animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.04, 1] }}
-                        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-                        className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs font-medium text-cyan-200"
-                      >
-                        Live
-                      </motion.div>
-                    </div>
 
-                    <div className="relative mt-10 flex items-center justify-center py-6">
-                      <motion.div
-                        animate={{ scale: [1, 1.22, 1], opacity: [0.22, 0.06, 0.22] }}
-                        transition={{ duration: 3.6, repeat: Infinity, ease: "easeInOut" }}
-                        className="absolute h-44 w-44 rounded-full border border-cyan-300/20"
-                      />
-                      <motion.div
-                        animate={{ scale: [1, 1.36, 1], opacity: [0.18, 0.04, 0.18] }}
-                        transition={{ duration: 3.6, repeat: Infinity, ease: "easeInOut", delay: 0.9 }}
-                        className="absolute h-56 w-56 rounded-full border border-fuchsia-300/16"
-                      />
-                      <motion.div
-                        animate={{ y: [0, -8, 0], boxShadow: ["0 0 0 rgba(34,211,238,0.15)", "0 0 48px rgba(34,211,238,0.22)", "0 0 0 rgba(34,211,238,0.15)"] }}
-                        transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
-                        className="relative flex h-32 w-32 items-center justify-center rounded-full border border-white/12 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.22),rgba(15,23,42,0.88))]"
-                      >
+                      <div className="relative mt-6 flex justify-center">
                         <motion.div
-                          animate={{ scaleY: [0.72, 1.08, 0.82, 1], opacity: [0.6, 1, 0.75, 1] }}
-                          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
-                          className="absolute inset-0 rounded-full bg-[radial-gradient(circle,rgba(34,211,238,0.16),transparent_58%)]"
-                        />
-                        <svg
-                          className="relative h-14 w-14 text-cyan-200"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
+                          initial={{ opacity: 0, y: 20, rotate: -5 }}
+                          animate={{ opacity: 1, y: 0, rotate: 0 }}
+                          transition={{ duration: 0.55, ease: smoothEase }}
+                          className="relative w-full max-w-[19rem] rounded-[36px] border border-white/10 bg-slate-900/85 p-3 shadow-[0_24px_70px_rgba(7,14,26,0.55)]"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={1.5}
-                            d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                          />
-                        </svg>
-                      </motion.div>
-                    </div>
+                          <div className="rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.9))] p-4">
+                            <div className="mx-auto mb-4 h-1.5 w-16 rounded-full bg-white/10" />
 
-                    <div className="relative mt-4 space-y-3">
-                      {landingExamples.map((step, index) => (
-                        <motion.div
-                          key={step.id}
-                          variants={fadeUp}
-                          whileHover={{ x: 6, y: -2, scale: 1.01, backgroundColor: "rgba(15,23,42,0.7)" }}
-                          transition={{ duration: 0.22, delay: index * 0.05 }}
-                          className="group rounded-[24px] border border-white/8 bg-slate-900/55 px-4 py-4 text-left"
-                        >
-                          <div className="flex items-start gap-4">
-                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300/18 to-fuchsia-300/14 text-cyan-200">
-                              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={step.icon} />
-                              </svg>
+                            <div className="rounded-[24px] border border-cyan-300/12 bg-cyan-300/8 px-4 py-4 text-left">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[11px] uppercase tracking-[0.24em] text-cyan-200">Capture vocale</p>
+                                <div className="flex gap-1.5">
+                                  {[0, 1, 2].map((bar) => (
+                                    <motion.span
+                                      key={bar}
+                                      animate={{ height: [8, 18 + bar * 4, 8] }}
+                                      transition={{ duration: 1.1, repeat: Infinity, repeatType: "mirror", delay: bar * 0.12 }}
+                                      className="block w-1 rounded-full bg-cyan-300"
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                              <p className="mt-3 text-sm leading-6 text-slate-100">
+                                &quot;Rendez-vous client mercredi 10h30&quot;
+                              </p>
                             </div>
-                            <div className="min-w-0">
-                              <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">{step.eyebrow}</p>
-                              <p className="mt-2 text-sm leading-6 text-slate-200">{step.text}</p>
-                            </div>
-                            <div className="ml-auto rounded-full border border-white/8 px-2.5 py-1 text-[11px] font-medium text-slate-400">
-                              {step.id}
+
+                            <div className="mt-4 space-y-3">
+                              {landingExamples.map((step, index) => (
+                                <motion.div
+                                  key={step.id}
+                                  variants={fadeUp}
+                                  whileHover={{ y: -2 }}
+                                  transition={{ duration: 0.2, delay: index * 0.04 }}
+                                  className="rounded-[22px] border border-white/8 bg-white/[0.03] px-4 py-3 text-left"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300/18 to-fuchsia-300/14 text-cyan-200">
+                                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={step.icon} />
+                                      </svg>
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-[10px] uppercase tracking-[0.28em] text-slate-500">{step.eyebrow}</p>
+                                      <p className="mt-1 text-sm leading-5 text-slate-200">{step.text}</p>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              ))}
                             </div>
                           </div>
                         </motion.div>
-                      ))}
+                      </div>
+
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <motion.div
+                          variants={fadeUp}
+                          className="rounded-[22px] border border-white/8 bg-white/[0.03] p-4 text-left"
+                        >
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Étape 1</p>
+                          <p className="mt-2 text-sm leading-6 text-slate-200">Touchez le bouton Google pour ouvrir une connexion simple et familière.</p>
+                        </motion.div>
+
+                        <motion.div
+                          variants={fadeUp}
+                          className="rounded-[22px] border border-white/8 bg-white/[0.03] p-4 text-left"
+                        >
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Étape 2</p>
+                          <p className="mt-2 text-sm leading-6 text-slate-200">Une fois connecté, vous pouvez dicter puis glisser vers le dashboard de suivi.</p>
+                        </motion.div>
+                      </div>
                     </div>
                   </motion.div>
                 </motion.section>
