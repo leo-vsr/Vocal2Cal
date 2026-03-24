@@ -312,6 +312,7 @@ export function History() {
   const [overflowHidden, setOverflowHidden] = useState(true);
   const isOpenRef = useRef(isOpen);
   const containerRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     isOpenRef.current = isOpen;
   }, [isOpen]);
@@ -337,11 +338,17 @@ export function History() {
     fetchHistory();
   }, [isOpen]);
 
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
+
   const handleToggle = () => {
     const opening = !isOpen;
     setIsOpen(opening);
     if (opening) {
-      setTimeout(() => {
+      timerRef.current = setTimeout(() => {
         containerRef.current?.scrollIntoView({
           behavior: "smooth",
           block: "nearest",
