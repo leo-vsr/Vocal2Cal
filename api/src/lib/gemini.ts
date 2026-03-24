@@ -6,10 +6,56 @@ export interface ParsedEvent {
   description?: string;
 }
 
-export async function parseEventsFromText(text: string, timezone?: string): Promise<ParsedEvent[]> {
+function getGeminiModel() {
+  return process.env.GEMINI_MODEL || "gemini-2.5-flash";
+}
+
+function getGeminiApiKey() {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY manquant");
   }
+
+  return process.env.GEMINI_API_KEY;
+}
+
+async function generateTextFromGemini(parts: Array<Record<string, unknown>>, responseMimeType = "text/plain") {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(getGeminiModel())}:generateContent?key=${encodeURIComponent(getGeminiApiKey())}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts,
+          },
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 4096,
+          responseMimeType,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Erreur Gemini API: ${err}`);
+  }
+
+  const data = await response.json();
+  return (
+    data.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("")?.trim() ||
+    ""
+  );
+}
+
+export async function parseEventsFromText(text: string, timezone?: string): Promise<ParsedEvent[]> {
+  getGeminiApiKey();
 
   const now = new Date();
   const today = now.toISOString().split("T")[0];
@@ -42,40 +88,7 @@ Règles :
 Réponds UNIQUEMENT avec le tableau JSON brut valide (guillemets doubles, pas de virgule trailing), sans markdown, sans backticks, sans explication. Exemple de format attendu :
 [{"title":"Coiffeur","date":"2026-03-06","startTime":"14:00","endTime":"15:00","description":""}]`;
 
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 4096,
-          responseMimeType: "application/json",
-        },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Erreur Gemini API: ${err}`);
-  }
-
-  const data = await response.json();
-  const responseText =
-    data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || "").join("")?.trim() ||
-    "[]";
+  const responseText = (await generateTextFromGemini([{ text: prompt }], "application/json")) || "[]";
 
   console.log("Gemini raw response:", responseText);
 
@@ -96,4 +109,27 @@ Réponds UNIQUEMENT avec le tableau JSON brut valide (guillemets doubles, pas de
 
   const events: ParsedEvent[] = JSON.parse(cleaned);
   return events;
+}
+
+export async function transcribeAudioToText(audioBase64: string, mimeType: string) {
+  getGeminiApiKey();
+
+  const prompt = `Transcris fidèlement cette dictée vocale en français.
+
+Règles :
+- Réponds uniquement avec le texte transcrit.
+- N'ajoute aucune explication.
+- Si l'audio est vide ou incompréhensible, réponds avec une chaîne vide.`;
+
+  const responseText = await generateTextFromGemini([
+    { text: prompt },
+    {
+      inlineData: {
+        mimeType,
+        data: audioBase64,
+      },
+    },
+  ]);
+
+  return responseText.trim();
 }

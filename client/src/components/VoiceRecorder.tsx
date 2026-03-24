@@ -25,8 +25,10 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
   const {
     transcript,
     isListening,
+    isTranscribing,
     error: speechError,
     isSupported,
+    mode,
     startListening,
     stopListening,
     resetTranscript,
@@ -98,7 +100,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
     }
   };
 
-  const isDisabled = !isSupported || isProcessing || isCooldown;
+  const isDisabled = !isSupported || isProcessing || isCooldown || isTranscribing;
 
   return (
     <div className="flex flex-col items-center gap-6 w-full">
@@ -211,7 +213,7 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
       {/* Status Text */}
       <AnimatePresence mode="wait">
         <motion.p
-          key={!isSupported ? "unsupported" : isListening ? "listening" : isProcessing ? "processing" : isCooldown ? "cooldown" : "idle"}
+          key={!isSupported ? "unsupported" : isListening ? "listening" : isTranscribing ? "transcribing" : isProcessing ? "processing" : isCooldown ? "cooldown" : "idle"}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
@@ -219,16 +221,26 @@ export function VoiceRecorder({ onSuccess }: { onSuccess?: () => void }) {
           className="text-sm text-slate-400"
         >
           {!isSupported
-            ? "Navigateur non supporté"
+            ? "Navigateur non compatible"
             : isListening
               ? "Parlez maintenant..."
+              : isTranscribing
+                ? "Transcription audio..."
               : isProcessing
                 ? "Traitement en cours..."
                 : isCooldown
                   ? "Patientez..."
-                  : "Appuyez pour dicter"}
+                  : mode === "recording"
+                    ? "Appuyez pour enregistrer votre dictée"
+                    : "Appuyez pour dicter"}
         </motion.p>
       </AnimatePresence>
+
+      {mode === "recording" && isSupported && (
+        <p className="max-w-md text-center text-xs leading-5 text-slate-500">
+          Ce navigateur utilise un enregistrement audio temporaire puis une transcription serveur.
+        </p>
+      )}
 
       {/* Speech Error */}
       <AnimatePresence>

@@ -2,7 +2,12 @@ import { useEffect, useState, useRef } from "react";
 import { motion, useMotionValue, useSpring, useTransform, useInView } from "framer-motion";
 import type { UsageData } from "@/types";
 
-export function UsageBar({ refreshKey }: { refreshKey?: number }) {
+interface UsageBarProps {
+  refreshKey?: number;
+  className?: string;
+}
+
+export function UsageBar({ refreshKey, className = "" }: UsageBarProps) {
   const [usage, setUsage] = useState<UsageData | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-40px" });
@@ -44,7 +49,7 @@ export function UsageBar({ refreshKey }: { refreshKey?: number }) {
       initial={{ opacity: 0, y: 10 }}
       animate={isInView ? { opacity: 1, y: 0 } : {}}
       transition={{ duration: 0.4, ease: "easeOut" }}
-      className="w-full max-w-md space-y-1.5"
+      className={`w-full max-w-md space-y-1.5 ${className}`.trim()}
     >
       <div className="flex justify-between items-center text-xs text-slate-500">
         <span>Appels aujourd&apos;hui</span>

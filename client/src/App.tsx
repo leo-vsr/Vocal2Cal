@@ -6,6 +6,41 @@ import { History } from "@/components/History";
 import { UsageBar } from "@/components/UsageBar";
 
 const smoothEase = [0.22, 1, 0.36, 1] as const;
+const dashboardHighlights = [
+  {
+    title: "Dictée naturelle",
+    value: "1 phrase",
+    description: "Décrivez plusieurs rendez-vous dans la même demande.",
+    icon: "M12 18h.01M8 21h8a2 2 0 002-2v-1.126a1 1 0 01.553-.894l3.618-1.809A2 2 0 0015 13.382V8.618a2 2 0 00-1.106-1.789l-3.618-1.809A1 1 0 019 4.126V3a2 2 0 00-2-2H5a2 2 0 00-2 2v1.126a1 1 0 01-.553.894l-.447.223A2 2 0 001 7.03v9.94a2 2 0 001.106 1.789l.447.223A1 1 0 013 19.874V21a2 2 0 002 2h2a2 2 0 002-2z",
+  },
+  {
+    title: "Ajout agenda",
+    value: "Google",
+    description: "Les événements créés partent directement dans votre calendrier principal.",
+    icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
+  },
+  {
+    title: "Traçabilité",
+    value: "Historique",
+    description: "Retrouvez vos dernières dictées et les créneaux générés juste à côté.",
+    icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+  },
+];
+
+const dashboardSteps = [
+  {
+    title: "Dictez comme vous parlez",
+    description: "Exemple : réunion mardi 9h, dentiste jeudi 17h30.",
+  },
+  {
+    title: "Vérifiez la transcription",
+    description: "La phrase reconnue reste visible avant l'envoi.",
+  },
+  {
+    title: "Confirmez puis contrôlez l'historique",
+    description: "Le panneau de droite vous permet de revoir chaque événement créé.",
+  },
+];
 
 const pageVariants = {
   hidden: { opacity: 0, scale: 0.95, y: 20 },
@@ -49,7 +84,7 @@ export default function App() {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: smoothEase }}
-        className="glass-strong sticky top-0 z-50 flex items-center justify-between px-5 py-3.5 sm:px-8 sm:py-4"
+        className="glass-strong sticky top-0 z-50 flex items-center justify-between border-b border-white/6 bg-slate-950/70 px-5 py-3.5 shadow-[0_18px_50px_rgba(6,10,20,0.24)] backdrop-blur-xl sm:px-8 sm:py-4"
       >
         <motion.div
           className="flex items-center gap-2.5"
@@ -250,65 +285,131 @@ export default function App() {
               initial="hidden"
               animate="visible"
               exit="exit"
-              className="flex flex-col items-center gap-8 sm:gap-10 w-full max-w-md sm:max-w-lg pt-6 sm:pt-10"
+              className="w-full max-w-7xl pt-2 sm:pt-4 lg:pt-8"
             >
               <motion.div
                 variants={staggerContainer}
                 initial="hidden"
                 animate="visible"
-                className="text-center space-y-2"
+                className="grid gap-6 xl:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] xl:items-start"
               >
-                <motion.p variants={fadeUp} className="text-slate-500 text-sm">
-                  Bonjour
-                  {user.name ? `, ${user.name.split(" ")[0]}` : ""}
-                </motion.p>
-                <motion.h2
-                  variants={fadeUp}
-                  className="text-2xl sm:text-3xl font-bold tracking-tight text-white"
-                >
-                  Que souhaitez-vous{" "}
-                  <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">
-                    planifier
-                  </span>
-                  &nbsp;?
-                </motion.h2>
-              </motion.div>
+                <div className="space-y-6 xl:sticky xl:top-28">
+                  <motion.section
+                    variants={fadeUp}
+                    className="glass-strong relative overflow-hidden rounded-[30px] border border-white/8 p-6 sm:p-8"
+                  >
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.16),transparent_72%)]" />
+                    <div className="pointer-events-none absolute -right-12 top-16 h-40 w-40 rounded-full bg-blue-500/10 blur-3xl" />
+                    <div className="relative">
+                      <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-slate-400">
+                        Dashboard vocal
+                      </div>
+                      <div className="space-y-3">
+                        <p className="text-sm text-slate-500">
+                          Bonjour
+                          {user.name ? `, ${user.name.split(" ")[0]}` : ""}
+                        </p>
+                        <h2 className="max-w-sm text-3xl font-semibold tracking-tight text-white sm:text-[2.15rem]">
+                          Planifiez vos rendez-vous sans quitter la voix.
+                        </h2>
+                        <p className="max-w-md text-sm leading-6 text-slate-400 sm:text-base">
+                          Le panneau reste visible sous le header sur desktop pour éviter le chevauchement du micro pendant le scroll.
+                        </p>
+                      </div>
+                    </div>
 
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.3, duration: 0.5, ease: smoothEase }}
-                className="w-full"
-              >
-                <VoiceRecorder
-                  onSuccess={() => setUsageRefresh((n) => n + 1)}
-                />
-              </motion.div>
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.92 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.25, duration: 0.45, ease: smoothEase }}
+                      className="relative mt-8"
+                    >
+                      <VoiceRecorder
+                        onSuccess={() => setUsageRefresh((n) => n + 1)}
+                      />
+                    </motion.div>
+                  </motion.section>
 
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.5 }}
-                className="w-full flex justify-center"
-              >
-                <UsageBar refreshKey={usageRefresh} />
-              </motion.div>
+                  <motion.section
+                    variants={fadeUp}
+                    className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
+                  >
+                    <div className="mb-4 flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Capacité du jour</p>
+                        <h3 className="mt-1 text-lg font-semibold text-white">Suivi d&apos;usage</h3>
+                      </div>
+                      <div className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
+                        Temps réel
+                      </div>
+                    </div>
+                    <UsageBar refreshKey={usageRefresh} className="max-w-none" />
+                  </motion.section>
 
+                  <motion.section
+                    variants={fadeUp}
+                    className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
+                  >
+                    <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Routine</p>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Cycle de création</h3>
+                    <div className="mt-5 space-y-4">
+                      {dashboardSteps.map((step, index) => (
+                        <div key={step.title} className="flex items-start gap-3">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/8 bg-white/[0.04] text-sm font-semibold text-blue-300">
+                            {index + 1}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-white">{step.title}</p>
+                            <p className="mt-1 text-sm leading-6 text-slate-400">{step.description}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.section>
+                </div>
+
+                <div className="space-y-6">
+                  <motion.section
+                    variants={fadeUp}
+                    className="grid gap-4 md:grid-cols-3"
+                  >
+                    {dashboardHighlights.map((item) => (
+                      <div
+                        key={item.title}
+                        className="glass rounded-[24px] border border-white/6 p-5"
+                      >
+                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/16 to-cyan-400/10 text-blue-300">
+                          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d={item.icon} />
+                          </svg>
+                        </div>
+                        <p className="mt-4 text-xs uppercase tracking-[0.18em] text-slate-500">{item.title}</p>
+                        <p className="mt-2 text-2xl font-semibold tracking-tight text-white">{item.value}</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-400">{item.description}</p>
+                      </div>
+                    ))}
+                  </motion.section>
+
+                  <motion.section
+                    variants={fadeUp}
+                    className="glass-strong rounded-[30px] border border-white/8 p-5 sm:p-6"
+                  >
+                    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Centre de contrôle</p>
+                        <h3 className="mt-1 text-2xl font-semibold tracking-tight text-white">Historique des dictées</h3>
+                      </div>
+                      <p className="max-w-md text-sm leading-6 text-slate-400">
+                        Vérifiez vos demandes récentes, les créneaux générés et les faux rendez-vous de démo ajoutés pour les tests.
+                      </p>
+                    </div>
+                    <History />
+                  </motion.section>
+                </div>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* History — full-width section outside the narrow container */}
-        {user && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6, duration: 0.4 }}
-            className="w-full mt-6 sm:mt-10"
-          >
-            <History />
-          </motion.div>
-        )}
       </main>
 
       {/* Footer */}

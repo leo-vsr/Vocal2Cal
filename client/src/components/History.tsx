@@ -290,10 +290,10 @@ function HistoryCard({ action, index }: { action: VoiceAction; index: number }) 
   );
 }
 
-function HistoryGrid({ actions }: { actions: VoiceAction[] }) {
+function HistoryStack({ actions }: { actions: VoiceAction[] }) {
   return (
     <motion.div
-      className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5"
+      className="mx-auto flex w-full max-w-2xl flex-col gap-4 sm:gap-5"
       variants={gridVariants}
       initial="hidden"
       animate="visible"
@@ -332,7 +332,7 @@ export function History() {
   }, [isOpen]);
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-2">
+    <div className="mx-auto w-full max-w-2xl px-2">
       <motion.button
         onClick={() => setIsOpen(!isOpen)}
         whileHover={{ scale: 1.01 }}
@@ -412,7 +412,7 @@ export function History() {
                   <p className="text-slate-600 text-xs mt-1">Vos futures dictées apparaîtront ici</p>
                 </motion.div>
               ) : (
-                <HistoryGrid actions={actions} />
+                <HistoryStack actions={actions} />
               )}
             </div>
           </motion.div>
