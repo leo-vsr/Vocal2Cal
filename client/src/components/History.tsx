@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { EventCard } from "./EventCard";
 import type { CreatedEvent, VoiceAction } from "@/types";
@@ -309,6 +309,11 @@ export function History() {
   const [actions, setActions] = useState<VoiceAction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
+  const [overflowHidden, setOverflowHidden] = useState(true);
+  const isOpenRef = useRef(isOpen);
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -377,7 +382,11 @@ export function History() {
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as const }}
-            className="overflow-hidden"
+            onAnimationStart={() => setOverflowHidden(true)}
+            onAnimationComplete={() => {
+              if (isOpenRef.current) setOverflowHidden(false);
+            }}
+            className={overflowHidden ? "overflow-hidden" : ""}
           >
             <div className="mt-6">
               {isLoading ? (
