@@ -311,6 +311,7 @@ export function History() {
   const [isOpen, setIsOpen] = useState(false);
   const [overflowHidden, setOverflowHidden] = useState(true);
   const isOpenRef = useRef(isOpen);
+  const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     isOpenRef.current = isOpen;
   }, [isOpen]);
@@ -336,10 +337,23 @@ export function History() {
     fetchHistory();
   }, [isOpen]);
 
+  const handleToggle = () => {
+    const opening = !isOpen;
+    setIsOpen(opening);
+    if (opening) {
+      setTimeout(() => {
+        containerRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      }, 50);
+    }
+  };
+
   return (
-    <div className="mx-auto w-full max-w-2xl px-2">
+    <div ref={containerRef} className="mx-auto w-full max-w-2xl px-2">
       <motion.button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         whileHover={{ scale: 1.01 }}
         whileTap={{ scale: 0.99 }}
         className="w-full max-w-md mx-auto glass-strong flex items-center justify-between py-3.5 px-5 rounded-2xl transition-colors group"
