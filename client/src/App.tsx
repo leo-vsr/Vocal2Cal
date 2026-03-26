@@ -619,7 +619,7 @@ export default function App() {
                         <div className="rounded-2xl border border-cyan-300/12 bg-cyan-300/8 px-4 py-4 text-left">
                           <div className="flex items-center justify-between">
                             <p className="text-[11px] uppercase tracking-[0.24em] text-cyan-200">Capture vocale</p>
-                            <div className="flex gap-1.5">
+                            <div className="flex h-7 items-end gap-1.5">
                               {[0, 1, 2].map((bar) => (
                                 <motion.span
                                   key={bar}
