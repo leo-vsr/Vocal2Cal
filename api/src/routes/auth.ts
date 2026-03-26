@@ -128,6 +128,8 @@ router.get("/me", async (req: Request, res: Response) => {
     return;
   }
 
+  setAuthCookie(res, user.id);
+
   res.json({
     user,
   });
