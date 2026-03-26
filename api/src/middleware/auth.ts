@@ -1,8 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
+import { getAuthenticatedUserId } from "../lib/auth-cookie";
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (!req.session?.userId) {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) {
     res.status(401).json({ error: "Non authentifié" });
     return;
   }
@@ -10,13 +12,14 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
-  if (!req.session?.userId) {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) {
     res.status(401).json({ error: "Non authentifié" });
     return;
   }
 
   const user = await prisma.user.findUnique({
-    where: { id: req.session.userId },
+    where: { id: userId },
     select: { role: true },
   });
 
@@ -29,13 +32,14 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 }
 
 export async function requireCredits(req: Request, res: Response, next: NextFunction): Promise<void> {
-  if (!req.session?.userId) {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) {
     res.status(401).json({ error: "Non authentifié" });
     return;
   }
 
   const user = await prisma.user.findUnique({
-    where: { id: req.session.userId },
+    where: { id: userId },
     select: { credits: true },
   });
 

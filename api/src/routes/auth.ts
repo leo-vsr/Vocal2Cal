@@ -7,6 +7,7 @@ import {
   StrategyOptions,
 } from "passport-google-oauth20";
 import { prisma } from "../lib/prisma";
+import { clearAuthCookie, getAuthenticatedUserId, setAuthCookie } from "../lib/auth-cookie";
 
 const router = Router();
 
@@ -89,45 +90,64 @@ router.get(
   (req: Request, res: Response) => {
     // Store userId in session for our middleware
     if (req.user) {
-      req.session.userId = (req.user as { id: string }).id;
+      const userId = (req.user as { id: string }).id;
+      req.session.userId = userId;
+      setAuthCookie(res, userId);
     }
-    const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
-    res.redirect(clientUrl);
+
+    req.session.save(() => {
+      const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+      res.redirect(clientUrl);
+    });
   }
 );
 
-router.get("/me", (req: Request, res: Response) => {
-  if (!req.session?.userId || !req.user) {
+router.get("/me", async (req: Request, res: Response) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) {
     res.status(401).json({ error: "Non authentifié" });
     return;
   }
 
-  const user = req.user as {
-    id: string;
-    name: string | null;
-    email: string | null;
-    image: string | null;
-    role: string;
-    credits: number;
-    plan: string;
-  };
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      image: true,
+      role: true,
+      credits: true,
+      plan: true,
+    },
+  });
+
+  if (!user) {
+    clearAuthCookie(res);
+    res.status(401).json({ error: "Non authentifié" });
+    return;
+  }
 
   res.json({
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      image: user.image,
-      role: user.role,
-      credits: user.credits,
-      plan: user.plan,
-    },
+    user,
   });
 });
 
 router.post("/logout", (req: Request, res: Response) => {
+  clearAuthCookie(res);
   req.logout(() => {
+    if (!req.session) {
+      res.json({ success: true });
+      return;
+    }
+
     req.session.destroy(() => {
+      res.clearCookie("connect.sid", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        path: "/",
+      });
       res.json({ success: true });
     });
   });
