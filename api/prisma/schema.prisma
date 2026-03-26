@@ -7,20 +7,48 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─── Enums ───────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  BUSINESS
+}
+
+enum TransactionType {
+  SIGNUP_BONUS
+  PURCHASE
+  USAGE
+  ADMIN_GRANT
+  SUBSCRIPTION_RENEWAL
+}
+
 // ─── Auth Models ───────────────────────────────────────
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  image         String?
-  googleId      String    @unique
-  accessToken   String?   @db.Text
-  refreshToken  String?   @db.Text
-  tokenExpiry   DateTime?
-  voiceActions  VoiceAction[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  name              String?
+  email             String?   @unique
+  image             String?
+  googleId          String    @unique
+  accessToken       String?   @db.Text
+  refreshToken      String?   @db.Text
+  tokenExpiry       DateTime?
+  role              Role      @default(USER)
+  credits           Int       @default(5)
+  plan              Plan      @default(FREE)
+  stripeCustomerId  String?   @unique
+  voiceActions      VoiceAction[]
+  payments          Payment[]
+  creditTransactions CreditTransaction[]
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 // ─── Application Models ───────────────────────────────────
@@ -34,4 +62,35 @@ model VoiceAction {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Payment & Credits ────────────────────────────────────
+
+model Payment {
+  id                String   @id @default(cuid())
+  userId            String
+  stripeSessionId   String   @unique
+  stripePaymentId   String?
+  plan              Plan
+  amount            Int      // in cents
+  currency          String   @default("eur")
+  creditsGranted    Int
+  status            String   @default("pending") // pending, completed, failed
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CreditTransaction {
+  id          String          @id @default(cuid())
+  userId      String
+  type        TransactionType
+  amount      Int             // positive = credit added, negative = credit used
+  balance     Int             // balance after transaction
+  description String?
+  createdAt   DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

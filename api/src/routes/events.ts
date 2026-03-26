@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireCredits } from "../middleware/auth";
 import { prisma } from "../lib/prisma";
 import { parseEventsFromText, transcribeAudioToText } from "../lib/gemini";
 import { getValidAccessToken, getCalendarClient, ReauthRequiredError } from "../lib/google";
@@ -121,7 +121,7 @@ function getDemoHistory(userId: string) {
 }
 
 // POST /api/transcribe-audio — Transcribe browser-recorded audio to text
-router.post("/transcribe-audio", requireAuth, async (req: Request, res: Response) => {
+router.post("/transcribe-audio", requireAuth, requireCredits, async (req: Request, res: Response) => {
   const { audioBase64, mimeType } = req.body as {
     audioBase64?: string;
     mimeType?: string;
@@ -150,6 +150,23 @@ router.post("/transcribe-audio", requireAuth, async (req: Request, res: Response
 
   try {
     const transcript = await transcribeAudioToText(audioBase64, normalizedMimeType);
+
+    // Deduct 1 credit
+    const userId = req.session.userId!;
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { credits: { decrement: 1 } },
+    });
+    await prisma.creditTransaction.create({
+      data: {
+        userId,
+        type: "USAGE",
+        amount: -1,
+        balance: updatedUser.credits,
+        description: "Transcription audio",
+      },
+    });
+
     res.json({ transcript });
   } catch (error) {
     console.error("Erreur transcribe-audio:", error);
@@ -159,7 +176,7 @@ router.post("/transcribe-audio", requireAuth, async (req: Request, res: Response
 });
 
 // POST /api/parse-events — Parse text & create Google Calendar events
-router.post("/parse-events", requireAuth, async (req: Request, res: Response) => {
+router.post("/parse-events", requireAuth, requireCredits, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
   const { text, timezone } = req.body;
   const tz = timezone || "Europe/Paris";
@@ -229,7 +246,22 @@ router.post("/parse-events", requireAuth, async (req: Request, res: Response) =>
       },
     });
 
-    res.json({ events: createdEvents });
+    // 5. Deduct 1 credit
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { credits: { decrement: 1 } },
+    });
+    await prisma.creditTransaction.create({
+      data: {
+        userId,
+        type: "USAGE",
+        amount: -1,
+        balance: updatedUser.credits,
+        description: `Création de ${createdEvents.length} événement(s)`,
+      },
+    });
+
+    res.json({ events: createdEvents, creditsRemaining: updatedUser.credits });
   } catch (error) {
     if (error instanceof ReauthRequiredError) {
       res.status(401).json({ error: "SESSION_EXPIRED" });
@@ -260,18 +292,49 @@ router.get("/history", requireAuth, async (req: Request, res: Response) => {
   res.json({ actions });
 });
 
-// GET /api/usage — Fetch daily usage stats
+// GET /api/usage — Fetch user credit balance + usage stats
 router.get("/usage", requireAuth, async (req: Request, res: Response) => {
-  const startOfDay = new Date();
+  const userId = req.session.userId!;
+  const now = new Date();
+  const startOfDay = new Date(now);
   startOfDay.setHours(0, 0, 0, 0);
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - 7);
+  const startOfMonth = new Date(now);
+  startOfMonth.setDate(now.getDate() - 30);
 
-  const used = await prisma.voiceAction.count({
-    where: {
-      createdAt: { gte: startOfDay },
+  const [user, todayUsage, weekUsage, monthUsage, recentTransactions] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { credits: true, plan: true },
+    }),
+    prisma.voiceAction.count({
+      where: { userId, createdAt: { gte: startOfDay } },
+    }),
+    prisma.voiceAction.count({
+      where: { userId, createdAt: { gte: startOfWeek } },
+    }),
+    prisma.voiceAction.count({
+      where: { userId, createdAt: { gte: startOfMonth } },
+    }),
+    prisma.creditTransaction.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+  ]);
+
+  res.json({
+    credits: user?.credits ?? 0,
+    plan: user?.plan ?? "FREE",
+    usage: {
+      today: todayUsage,
+      week: weekUsage,
+      month: monthUsage,
+      avgPerDay: monthUsage > 0 ? Math.round((monthUsage / 30) * 10) / 10 : 0,
     },
+    transactions: recentTransactions,
   });
-
-  res.json({ used, limit: DAILY_LIMIT });
 });
 
 export default router;

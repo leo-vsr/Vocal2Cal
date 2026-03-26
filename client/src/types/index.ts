@@ -3,6 +3,9 @@ export interface User {
   name: string | null;
   email: string | null;
   image: string | null;
+  role: "USER" | "ADMIN";
+  credits: number;
+  plan: "FREE" | "STARTER" | "PRO" | "BUSINESS";
 }
 
 export interface CreatedEvent {
@@ -22,7 +25,70 @@ export interface VoiceAction {
   createdAt: string;
 }
 
+export interface CreditTransaction {
+  id: string;
+  type: "SIGNUP_BONUS" | "PURCHASE" | "USAGE" | "ADMIN_GRANT" | "SUBSCRIPTION_RENEWAL";
+  amount: number;
+  balance: number;
+  description: string | null;
+  createdAt: string;
+}
+
 export interface UsageData {
-  used: number;
-  limit: number;
+  credits: number;
+  plan: string;
+  usage: {
+    today: number;
+    week: number;
+    month: number;
+    avgPerDay: number;
+  };
+  transactions: CreditTransaction[];
+}
+
+export interface PlanInfo {
+  id: string;
+  name: string;
+  price: number;
+  credits: number;
+  description: string;
+}
+
+export interface AdminStats {
+  users: {
+    total: number;
+    planDistribution: Array<{ plan: string; count: number }>;
+  };
+  actions: {
+    total: number;
+    today: number;
+    week: number;
+    month: number;
+  };
+  revenue: {
+    total: number;
+    month: number;
+  };
+  apiCosts: {
+    estimatedTotal: number;
+    estimatedMonth: number;
+    costPerCall: number;
+  };
+  margin: {
+    totalRevenue: number;
+    totalCosts: number;
+    netProfit: number;
+  };
+}
+
+export interface AdminUser {
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  role: string;
+  credits: number;
+  plan: string;
+  createdAt: string;
+  _count: { voiceActions: number; payments: number };
 }
