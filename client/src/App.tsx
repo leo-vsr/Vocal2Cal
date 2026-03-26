@@ -70,7 +70,7 @@ const landingSignals = [
   { value: "Instantané", label: "relecture rapide avant validation" },
 ];
 
-type AppView = "home" | "dashboard" | "admin";
+type AppView = "home" | "dashboard" | "pricing" | "admin";
 
 const baseViewTabs: Array<{ id: AppView; label: string; icon: string }> = [
   {
@@ -82,6 +82,11 @@ const baseViewTabs: Array<{ id: AppView; label: string; icon: string }> = [
     id: "dashboard",
     label: "Dashboard",
     icon: "M3 13h8V3H3v10zm10 8h8V3h-8v18zm-10 0h8v-6H3v6z",
+  },
+  {
+    id: "pricing",
+    label: "Tarifs",
+    icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
   },
 ];
 
@@ -257,15 +262,14 @@ export default function App() {
       return;
     }
 
-    if (direction === "right" && activeView === "home") {
-      setActiveView("dashboard");
-      showSwipeHint(direction);
-    } else if (direction === "left" && activeView === "dashboard") {
-      setActiveView("home");
-      showSwipeHint(direction);
-    } else {
-      return;
-    }
+    const currentIndex = viewTabs.findIndex((t) => t.id === activeView);
+    if (currentIndex === -1) return;
+
+    const nextIndex = direction === "right" ? currentIndex + 1 : currentIndex - 1;
+    if (nextIndex < 0 || nextIndex >= viewTabs.length) return;
+
+    setActiveView(viewTabs[nextIndex].id);
+    showSwipeHint(direction);
 
     swipeLockedRef.current = true;
     if (swipeCooldownTimeoutRef.current) {
@@ -1090,6 +1094,109 @@ export default function App() {
                         </div>
                         <History />
                       </motion.section>
+                    </motion.div>
+                  ) : activeView === "pricing" ? (
+                    <motion.div
+                      key="pricing-view"
+                      variants={panelVariants}
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
+                      className="w-full space-y-5"
+                    >
+                      <motion.section
+                        variants={fadeUp}
+                        initial="hidden"
+                        animate="visible"
+                        className="glass-strong rounded-[30px] border border-white/8 p-5 sm:p-6"
+                      >
+                        <p className="text-xs uppercase tracking-[0.22em] text-fuchsia-300">Tarifs</p>
+                        <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                          Rechargez vos cr&eacute;dits
+                        </h2>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                          1 cr&eacute;dit = 1 appel IA (dict&eacute;e vocale ou transcription). Choisissez le pack adapt&eacute; &agrave; votre usage.
+                        </p>
+                      </motion.section>
+
+                      <motion.div
+                        variants={fadeUp}
+                        initial="hidden"
+                        animate="visible"
+                        transition={{ delay: 0.08 }}
+                        className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4"
+                      >
+                        {[
+                          { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Offerts à l'inscription", cta: "Plan actuel", popular: false, disabled: true },
+                          { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "50 crédits", desc: "Usage occasionnel", cta: "Acheter", popular: false, disabled: false },
+                          { id: "PRO", name: "Pro", price: "9,99€", period: "/mois", credits: "200 crédits", desc: "Usage régulier", cta: "Acheter", popular: true, disabled: false },
+                          { id: "BUSINESS", name: "Business", price: "19,99€", period: "/mois", credits: "1000 crédits", desc: "Usage intensif", cta: "Acheter", popular: false, disabled: false },
+                        ].map((plan, index) => (
+                          <motion.div
+                            key={plan.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.1 + index * 0.06, duration: 0.3 }}
+                            whileHover={!plan.disabled ? { y: -4 } : undefined}
+                            className={`relative flex flex-col rounded-2xl border p-6 ${
+                              plan.popular
+                                ? "border-cyan-400/30 bg-gradient-to-b from-cyan-500/[0.08] to-transparent shadow-[0_0_40px_rgba(34,211,238,0.08)]"
+                                : "border-white/6 bg-white/[0.02]"
+                            }`}
+                          >
+                            {plan.popular && (
+                              <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-900">
+                                Populaire
+                              </div>
+                            )}
+                            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{plan.name}</p>
+                            <div className="mt-3 flex items-baseline gap-1">
+                              <span className="text-3xl font-bold text-white">{plan.price}</span>
+                              {plan.period && <span className="text-sm text-slate-500">{plan.period}</span>}
+                            </div>
+                            <p className="mt-1 text-sm font-medium text-cyan-300">{plan.credits}</p>
+                            <p className="mt-2 flex-1 text-sm text-slate-400">{plan.desc}</p>
+                            <motion.button
+                              whileHover={!plan.disabled ? { scale: 1.03 } : undefined}
+                              whileTap={!plan.disabled ? { scale: 0.97 } : undefined}
+                              onClick={!plan.disabled ? async () => {
+                                try {
+                                  const res = await fetch("/api/stripe/checkout", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    credentials: "include",
+                                    body: JSON.stringify({ plan: plan.id }),
+                                  });
+                                  const data = await res.json();
+                                  if (data.url) window.location.href = data.url;
+                                } catch { /* silently fail */ }
+                              } : undefined}
+                              disabled={plan.disabled}
+                              className={`mt-5 w-full rounded-xl py-3 text-sm font-semibold transition-colors ${
+                                plan.popular
+                                  ? "bg-white text-slate-900 hover:bg-gray-100"
+                                  : plan.disabled
+                                    ? "bg-white/5 text-slate-500 cursor-default"
+                                    : "bg-white/10 text-white hover:bg-white/15"
+                              }`}
+                            >
+                              {plan.cta}
+                            </motion.button>
+                          </motion.div>
+                        ))}
+                      </motion.div>
+
+                      <motion.div
+                        variants={fadeUp}
+                        initial="hidden"
+                        animate="visible"
+                        transition={{ delay: 0.2 }}
+                        className="glass rounded-2xl border border-white/6 p-5 text-center"
+                      >
+                        <p className="text-sm text-slate-400">
+                          Paiement s&eacute;curis&eacute; par <span className="font-medium text-white">Stripe</span>. Vos cr&eacute;dits sont ajout&eacute;s instantan&eacute;ment apr&egrave;s le paiement.
+                        </p>
+                      </motion.div>
                     </motion.div>
                   ) : activeView === "admin" && user?.role === "ADMIN" ? (
                     <motion.div

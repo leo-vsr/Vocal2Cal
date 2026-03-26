@@ -22,8 +22,14 @@ export function AdminPanel() {
           fetch("/api/admin/users", { credentials: "include" }),
         ]);
 
-        if (!statsRes.ok || !usersRes.ok) {
-          setError("Accès refusé ou erreur serveur");
+        if (!statsRes.ok) {
+          const body = await statsRes.text();
+          setError(`Stats (${statsRes.status}): ${body}`);
+          return;
+        }
+        if (!usersRes.ok) {
+          const body = await usersRes.text();
+          setError(`Users (${usersRes.status}): ${body}`);
           return;
         }
 
