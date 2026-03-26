@@ -34,6 +34,10 @@ npm run dev
 
 See [`api/.env.example`](./api/.env.example) for the full list.
 
+For Supabase + Vercel deployments:
+- `DATABASE_URL` should use the pooled transaction-mode connection string for runtime traffic.
+- `DIRECT_URL` should use the direct Postgres connection string for Prisma CLI operations.
+
 ## License
 
 MIT
