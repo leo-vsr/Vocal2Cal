@@ -139,30 +139,66 @@ const panelVariants = {
   },
 };
 
-function useTypewriter(text: string, speed = 70, startDelay = 600) {
+const rotatingPhrases = [
+  "à la voix",
+  "en une phrase",
+  "sans formulaire",
+];
+
+function useRotatingTypewriter(phrases: string[], typeSpeed = 70, eraseSpeed = 40, startDelay = 600, holdDelay = 2200) {
   const [displayed, setDisplayed] = useState("");
+  const [isTyping, setIsTyping] = useState(true);
+
   useEffect(() => {
-    let i = 0;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    const delay = setTimeout(() => {
-      intervalId = setInterval(() => {
-        if (i < text.length) {
-          setDisplayed(text.slice(0, i + 1));
-          i++;
-        } else if (intervalId) {
-          clearInterval(intervalId);
-          intervalId = null;
+    let phraseIndex = 0;
+    let charIndex = 0;
+    let phase: "waiting" | "typing" | "holding" | "erasing" = "waiting";
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    function tick() {
+      const current = phrases[phraseIndex];
+
+      if (phase === "waiting") {
+        phase = "typing";
+        setIsTyping(true);
+        timeoutId = setTimeout(tick, startDelay);
+      } else if (phase === "typing") {
+        if (charIndex <= current.length) {
+          setDisplayed(current.slice(0, charIndex));
+          charIndex++;
+          timeoutId = setTimeout(tick, typeSpeed);
+        } else {
+          phase = "holding";
+          setIsTyping(false);
+          timeoutId = setTimeout(tick, holdDelay);
         }
-      }, speed);
-    }, startDelay);
-    return () => {
-      clearTimeout(delay);
-      if (intervalId) {
-        clearInterval(intervalId);
+      } else if (phase === "holding") {
+        phase = "erasing";
+        setIsTyping(true);
+        charIndex = current.length;
+        timeoutId = setTimeout(tick, eraseSpeed);
+      } else if (phase === "erasing") {
+        if (charIndex > 0) {
+          charIndex--;
+          setDisplayed(current.slice(0, charIndex));
+          timeoutId = setTimeout(tick, eraseSpeed);
+        } else {
+          phraseIndex = (phraseIndex + 1) % phrases.length;
+          charIndex = 0;
+          phase = "typing";
+          timeoutId = setTimeout(tick, 300);
+        }
       }
+    }
+
+    tick();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [text, speed, startDelay]);
-  return displayed;
+  }, [phrases, typeSpeed, eraseSpeed, startDelay, holdDelay]);
+
+  return { displayed, isTyping };
 }
 
 export default function App() {
@@ -170,7 +206,7 @@ export default function App() {
   const [usageRefresh, setUsageRefresh] = useState(0);
   const [activeView, setActiveView] = useState<AppView>("home");
   const [swipeHint, setSwipeHint] = useState<SwipeDirection | null>(null);
-  const typedText = useTypewriter("à la voix");
+  const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
   const wheelDeltaRef = useRef(0);
   const wheelResetTimeoutRef = useRef<number | null>(null);
   const swipeCooldownTimeoutRef = useRef<number | null>(null);
@@ -428,7 +464,7 @@ export default function App() {
                       Organisez vos rendez-vous{" "}
                       <span className="bg-gradient-to-r from-cyan-300 via-blue-300 to-fuchsia-300 bg-clip-text text-transparent">
                         {typedText}
-                        {typedText.length < "à la voix".length && (
+                        {isTyping && (
                           <motion.span
                             animate={{ opacity: [1, 0] }}
                             transition={{ duration: 0.55, repeat: Infinity, repeatType: "reverse" }}
