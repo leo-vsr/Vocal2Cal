@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { History } from "@/components/History";
 import { UsageBar } from "@/components/UsageBar";
+import { AdminPanel } from "@/components/AdminPanel";
 
 const smoothEase = [0.22, 1, 0.36, 1] as const;
 const dashboardHighlights = [
@@ -69,9 +70,9 @@ const landingSignals = [
   { value: "Instantané", label: "relecture rapide avant validation" },
 ];
 
-type AppView = "home" | "dashboard";
+type AppView = "home" | "dashboard" | "admin";
 
-const viewTabs: Array<{ id: AppView; label: string; icon: string }> = [
+const baseViewTabs: Array<{ id: AppView; label: string; icon: string }> = [
   {
     id: "home",
     label: "Accueil",
@@ -83,6 +84,12 @@ const viewTabs: Array<{ id: AppView; label: string; icon: string }> = [
     icon: "M3 13h8V3H3v10zm10 8h8V3h-8v18zm-10 0h8v-6H3v6z",
   },
 ];
+
+const adminTab: { id: AppView; label: string; icon: string } = {
+  id: "admin",
+  label: "Admin",
+  icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.573-1.066z M15 12a3 3 0 11-6 0 3 3 0 016 0z",
+};
 
 const SWIPE_DISTANCE_THRESHOLD = 96;
 const SWIPE_VELOCITY_THRESHOLD = 650;
@@ -207,6 +214,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<AppView>("home");
   const [swipeHint, setSwipeHint] = useState<SwipeDirection | null>(null);
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
+  const viewTabs = user?.role === "ADMIN" ? [...baseViewTabs, adminTab] : baseViewTabs;
   const wheelDeltaRef = useRef(0);
   const wheelResetTimeoutRef = useRef<number | null>(null);
   const swipeCooldownTimeoutRef = useRef<number | null>(null);
@@ -607,6 +615,78 @@ export default function App() {
                 </div>
               </section>
 
+              {/* ── Pricing ── */}
+              <section className="relative px-4 py-16 sm:px-8 sm:py-24" id="pricing">
+                <div className="mx-auto max-w-5xl">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, margin: "-60px" }}
+                    transition={{ duration: 0.5, ease: smoothEase }}
+                    className="text-center"
+                  >
+                    <p className="text-[11px] uppercase tracking-[0.3em] text-fuchsia-300">Tarifs</p>
+                    <h3 className="mt-3 text-2xl font-bold tracking-tight text-white sm:text-4xl">
+                      Un cr&eacute;dit, un appel IA
+                    </h3>
+                    <p className="mx-auto mt-3 max-w-lg text-sm leading-7 text-slate-400">
+                      Chaque dictée ou transcription consomme 1 crédit. Choisissez le plan qui correspond à votre usage.
+                    </p>
+                  </motion.div>
+
+                  <div className="mt-12 grid gap-5 sm:mt-16 sm:grid-cols-2 lg:grid-cols-4">
+                    {[
+                      { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Pour tester", cta: "Offert à l'inscription", popular: false, disabled: true },
+                      { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "50 crédits", desc: "Usage occasionnel", cta: "Choisir Starter", popular: false, disabled: false },
+                      { id: "PRO", name: "Pro", price: "9,99€", period: "/mois", credits: "200 crédits", desc: "Usage régulier", cta: "Choisir Pro", popular: true, disabled: false },
+                      { id: "BUSINESS", name: "Business", price: "19,99€", period: "/mois", credits: "1000 crédits", desc: "Usage intensif", cta: "Choisir Business", popular: false, disabled: false },
+                    ].map((plan, index) => (
+                      <motion.div
+                        key={plan.id}
+                        initial={{ opacity: 0, y: 30 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ delay: index * 0.08, duration: 0.5, ease: smoothEase }}
+                        whileHover={{ y: -6 }}
+                        className={`relative flex flex-col rounded-2xl border p-6 ${
+                          plan.popular
+                            ? "border-cyan-400/30 bg-gradient-to-b from-cyan-500/[0.08] to-transparent shadow-[0_0_40px_rgba(34,211,238,0.08)]"
+                            : "border-white/6 bg-white/[0.02]"
+                        }`}
+                      >
+                        {plan.popular && (
+                          <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-900">
+                            Populaire
+                          </div>
+                        )}
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{plan.name}</p>
+                        <div className="mt-3 flex items-baseline gap-1">
+                          <span className="text-3xl font-bold text-white">{plan.price}</span>
+                          {plan.period && <span className="text-sm text-slate-500">{plan.period}</span>}
+                        </div>
+                        <p className="mt-1 text-sm font-medium text-cyan-300">{plan.credits}</p>
+                        <p className="mt-2 flex-1 text-sm text-slate-400">{plan.desc}</p>
+                        <motion.button
+                          whileHover={!plan.disabled ? { scale: 1.03 } : undefined}
+                          whileTap={!plan.disabled ? { scale: 0.97 } : undefined}
+                          onClick={!plan.disabled ? signIn : undefined}
+                          disabled={plan.disabled}
+                          className={`mt-5 w-full rounded-xl py-3 text-sm font-semibold transition-colors ${
+                            plan.popular
+                              ? "bg-white text-slate-900 hover:bg-gray-100"
+                              : plan.disabled
+                                ? "bg-white/5 text-slate-500 cursor-default"
+                                : "bg-white/10 text-white hover:bg-white/15"
+                          }`}
+                        >
+                          {plan.cta}
+                        </motion.button>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
               {/* ── Phone mockup ── */}
               <section className="relative overflow-hidden px-4 py-16 sm:px-8 sm:py-24">
                 <div className="mx-auto flex max-w-5xl flex-col items-center gap-10 lg:flex-row lg:gap-16">
@@ -874,7 +954,7 @@ export default function App() {
                         <History />
                       </motion.div>
                     </motion.div>
-                  ) : (
+                  ) : activeView === "dashboard" ? (
                     <motion.div
                       key="dashboard-view"
                       variants={panelVariants}
@@ -1011,7 +1091,48 @@ export default function App() {
                         <History />
                       </motion.section>
                     </motion.div>
-                  )}
+                  ) : activeView === "admin" && user?.role === "ADMIN" ? (
+                    <motion.div
+                      key="admin-view"
+                      variants={panelVariants}
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
+                      className="w-full space-y-5"
+                    >
+                      <motion.section
+                        variants={fadeUp}
+                        initial="hidden"
+                        animate="visible"
+                        className="glass-strong rounded-[30px] border border-white/8 p-5 sm:p-6"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.22em] text-amber-400">Administration</p>
+                            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                              Panneau admin
+                            </h2>
+                            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                              Vue d&apos;ensemble de la plateforme, utilisateurs, revenus et co&ucirc;ts API.
+                            </p>
+                          </div>
+                          <motion.button
+                            type="button"
+                            onClick={() => setActiveView("home")}
+                            whileHover={{ x: -2 }}
+                            whileTap={{ scale: 0.98 }}
+                            className="inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-white/[0.06]"
+                          >
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                            </svg>
+                            Retour
+                          </motion.button>
+                        </div>
+                      </motion.section>
+                      <AdminPanel />
+                    </motion.div>
+                  ) : null}
                 </AnimatePresence>
               </motion.div>
             </motion.div>
