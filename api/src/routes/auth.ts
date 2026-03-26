@@ -107,6 +107,9 @@ router.get("/me", (req: Request, res: Response) => {
     name: string | null;
     email: string | null;
     image: string | null;
+    role: string;
+    credits: number;
+    plan: string;
   };
 
   res.json({
@@ -115,6 +118,9 @@ router.get("/me", (req: Request, res: Response) => {
       name: user.name,
       email: user.email,
       image: user.image,
+      role: user.role,
+      credits: user.credits,
+      plan: user.plan,
     },
   });
 });
