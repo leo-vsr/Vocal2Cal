@@ -5,6 +5,7 @@ import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { History } from "@/components/History";
 import { UsageBar } from "@/components/UsageBar";
 import { AdminPanel } from "@/components/AdminPanel";
+import type { UsageData } from "@/types";
 
 const smoothEase = [0.22, 1, 0.36, 1] as const;
 const dashboardHighlights = [
@@ -69,6 +70,20 @@ const landingSignals = [
   { value: "Google", label: "synchronisation directe à l'agenda" },
   { value: "Instantané", label: "relecture rapide avant validation" },
 ];
+
+const PLAN_LABELS = {
+  FREE: "Découverte",
+  STARTER: "Starter",
+  PRO: "Pro",
+  BUSINESS: "Business",
+} as const;
+
+const PRICING_PLANS = [
+  { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Offerts à l'inscription", popular: false },
+  { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "50 crédits", desc: "Usage occasionnel", popular: false },
+  { id: "PRO", name: "Pro", price: "9,99€", period: "/mois", credits: "200 crédits", desc: "Usage régulier", popular: true },
+  { id: "BUSINESS", name: "Business", price: "19,99€", period: "/mois", credits: "1000 crédits", desc: "Usage intensif", popular: false },
+] as const;
 
 type AppView = "home" | "dashboard" | "pricing" | "admin";
 
@@ -218,6 +233,8 @@ export default function App() {
   const [usageRefresh, setUsageRefresh] = useState(0);
   const [activeView, setActiveView] = useState<AppView>("home");
   const [swipeHint, setSwipeHint] = useState<SwipeDirection | null>(null);
+  const [accountUsage, setAccountUsage] = useState<Pick<UsageData, "credits" | "plan"> | null>(null);
+  const [checkoutPlanId, setCheckoutPlanId] = useState<string | null>(null);
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
   const viewTabs = user?.role === "ADMIN" ? [...baseViewTabs, adminTab] : baseViewTabs;
   const wheelDeltaRef = useRef(0);
@@ -225,12 +242,48 @@ export default function App() {
   const swipeCooldownTimeoutRef = useRef<number | null>(null);
   const swipeHintTimeoutRef = useRef<number | null>(null);
   const swipeLockedRef = useRef(false);
+  const activePlanId = accountUsage?.plan ?? user?.plan ?? "FREE";
+  const activePlanLabel = PLAN_LABELS[activePlanId as keyof typeof PLAN_LABELS] || activePlanId;
+  const availableCredits = accountUsage?.credits ?? user?.credits ?? 0;
+  const creditAccentClass =
+    availableCredits <= 2
+      ? "text-red-300"
+      : availableCredits <= 10
+        ? "text-amber-200"
+        : "text-cyan-100";
 
   useEffect(() => {
     if (!user) {
       setActiveView("home");
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setAccountUsage(null);
+      return;
+    }
+
+    let isMounted = true;
+
+    fetch("/api/usage", { credentials: "include" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: UsageData | null) => {
+        if (!isMounted || !data || typeof data.credits !== "number") {
+          return;
+        }
+
+        setAccountUsage({
+          credits: data.credits,
+          plan: data.plan,
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id, usageRefresh]);
 
   useEffect(() => {
     return () => {
@@ -331,6 +384,33 @@ export default function App() {
     setViewFromSwipe(direction);
   };
 
+  const handleCheckout = async (planId: string) => {
+    if (checkoutPlanId) {
+      return;
+    }
+
+    setCheckoutPlanId(planId);
+
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ plan: planId }),
+      });
+
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+    } catch {
+      // The CTA resets below so the user can retry immediately.
+    }
+
+    setCheckoutPlanId(null);
+  };
+
   return (
     <div className="app-shell min-h-dvh flex flex-col safe-top safe-bottom safe-x">
       {/* Header */}
@@ -362,8 +442,20 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.3 }}
-              className="flex items-center gap-3"
+              className="flex items-center gap-2 sm:gap-3"
             >
+              <div className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-slate-200 shadow-[0_10px_30px_rgba(6,10,20,0.22)] sm:hidden">
+                <span className="font-semibold text-white">{activePlanLabel}</span>
+                <span className="mx-1.5 h-1 w-1 rounded-full bg-white/20" />
+                <span className={`font-medium ${creditAccentClass}`}>{availableCredits} cr.</span>
+              </div>
+              <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1.5 shadow-[0_10px_30px_rgba(6,10,20,0.22)] sm:flex">
+                <span className="inline-flex items-center rounded-full border border-cyan-300/15 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100">
+                  {activePlanLabel}
+                </span>
+                <span className="text-xs text-slate-400">Cr&eacute;dits</span>
+                <span className={`text-sm font-semibold ${creditAccentClass}`}>{availableCredits}</span>
+              </div>
               {user.image && (
                 <img
                   src={user.image}
@@ -639,13 +731,11 @@ export default function App() {
                   </motion.div>
 
                   <div className="mt-12 grid gap-5 sm:mt-16 sm:grid-cols-2 lg:grid-cols-4">
-                    {[
-                      { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Pour tester", cta: "Offert à l'inscription", popular: false, disabled: true },
-                      { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "50 crédits", desc: "Usage occasionnel", cta: "Choisir Starter", popular: false, disabled: false },
-                      { id: "PRO", name: "Pro", price: "9,99€", period: "/mois", credits: "200 crédits", desc: "Usage régulier", cta: "Choisir Pro", popular: true, disabled: false },
-                      { id: "BUSINESS", name: "Business", price: "19,99€", period: "/mois", credits: "1000 crédits", desc: "Usage intensif", cta: "Choisir Business", popular: false, disabled: false },
-                    ].map((plan, index) => (
-                      <motion.div
+                    {PRICING_PLANS.map((plan, index) => {
+                      const isFreePlan = plan.id === "FREE";
+
+                      return (
+                        <motion.div
                         key={plan.id}
                         initial={{ opacity: 0, y: 30 }}
                         whileInView={{ opacity: 1, y: 0 }}
@@ -671,22 +761,23 @@ export default function App() {
                         <p className="mt-1 text-sm font-medium text-cyan-300">{plan.credits}</p>
                         <p className="mt-2 flex-1 text-sm text-slate-400">{plan.desc}</p>
                         <motion.button
-                          whileHover={!plan.disabled ? { scale: 1.03 } : undefined}
-                          whileTap={!plan.disabled ? { scale: 0.97 } : undefined}
-                          onClick={!plan.disabled ? signIn : undefined}
-                          disabled={plan.disabled}
+                          whileHover={!isFreePlan ? { scale: 1.03 } : undefined}
+                          whileTap={!isFreePlan ? { scale: 0.97 } : undefined}
+                          onClick={!isFreePlan ? signIn : undefined}
+                          disabled={isFreePlan}
                           className={`mt-5 w-full rounded-xl py-3 text-sm font-semibold transition-colors ${
                             plan.popular
                               ? "bg-white text-slate-900 hover:bg-gray-100"
-                              : plan.disabled
+                              : isFreePlan
                                 ? "bg-white/5 text-slate-500 cursor-default"
                                 : "bg-white/10 text-white hover:bg-white/15"
                           }`}
                         >
-                          {plan.cta}
+                          {isFreePlan ? "Offert à l'inscription" : `Choisir ${plan.name}`}
                         </motion.button>
-                      </motion.div>
-                    ))}
+                        </motion.div>
+                      );
+                    })}
                   </div>
                 </div>
               </section>
@@ -1126,24 +1217,30 @@ export default function App() {
                         transition={{ delay: 0.08 }}
                         className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4"
                       >
-                        {[
-                          { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Offerts à l'inscription", cta: "Plan actuel", popular: false, disabled: true },
-                          { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "50 crédits", desc: "Usage occasionnel", cta: "Acheter", popular: false, disabled: false },
-                          { id: "PRO", name: "Pro", price: "9,99€", period: "/mois", credits: "200 crédits", desc: "Usage régulier", cta: "Acheter", popular: true, disabled: false },
-                          { id: "BUSINESS", name: "Business", price: "19,99€", period: "/mois", credits: "1000 crédits", desc: "Usage intensif", cta: "Acheter", popular: false, disabled: false },
-                        ].map((plan, index) => (
-                          <motion.div
+                        {PRICING_PLANS.map((plan, index) => {
+                          const isFreePlan = plan.id === "FREE";
+                          const isCurrentPlan = activePlanId === plan.id;
+                          const isCheckoutLoading = checkoutPlanId === plan.id;
+                          const isDisabled = isFreePlan || checkoutPlanId !== null;
+
+                          return (
+                            <motion.div
                             key={plan.id}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.1 + index * 0.06, duration: 0.3 }}
-                            whileHover={!plan.disabled ? { y: -4 } : undefined}
+                            whileHover={!isDisabled ? { y: -4 } : undefined}
                             className={`relative flex flex-col rounded-2xl border p-6 ${
                               plan.popular
                                 ? "border-cyan-400/30 bg-gradient-to-b from-cyan-500/[0.08] to-transparent shadow-[0_0_40px_rgba(34,211,238,0.08)]"
                                 : "border-white/6 bg-white/[0.02]"
                             }`}
                           >
+                            {isCurrentPlan && (
+                              <div className="absolute right-4 top-4 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100">
+                                Plan actuel
+                              </div>
+                            )}
                             {plan.popular && (
                               <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-900">
                                 Populaire
@@ -1157,33 +1254,32 @@ export default function App() {
                             <p className="mt-1 text-sm font-medium text-cyan-300">{plan.credits}</p>
                             <p className="mt-2 flex-1 text-sm text-slate-400">{plan.desc}</p>
                             <motion.button
-                              whileHover={!plan.disabled ? { scale: 1.03 } : undefined}
-                              whileTap={!plan.disabled ? { scale: 0.97 } : undefined}
-                              onClick={!plan.disabled ? async () => {
-                                try {
-                                  const res = await fetch("/api/stripe/checkout", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    credentials: "include",
-                                    body: JSON.stringify({ plan: plan.id }),
-                                  });
-                                  const data = await res.json();
-                                  if (data.url) window.location.href = data.url;
-                                } catch { /* silently fail */ }
-                              } : undefined}
-                              disabled={plan.disabled}
-                              className={`mt-5 w-full rounded-xl py-3 text-sm font-semibold transition-colors ${
+                              whileHover={!isDisabled ? { scale: 1.03 } : undefined}
+                              whileTap={!isDisabled ? { scale: 0.97 } : undefined}
+                              onClick={!isFreePlan ? () => handleCheckout(plan.id) : undefined}
+                              disabled={isDisabled}
+                              aria-busy={isCheckoutLoading}
+                              className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-colors ${
                                 plan.popular
                                   ? "bg-white text-slate-900 hover:bg-gray-100"
-                                  : plan.disabled
+                                  : isFreePlan
                                     ? "bg-white/5 text-slate-500 cursor-default"
-                                    : "bg-white/10 text-white hover:bg-white/15"
+                                    : isDisabled
+                                      ? "bg-white/10 text-white/60"
+                                      : "bg-white/10 text-white hover:bg-white/15"
                               }`}
                             >
-                              {plan.cta}
+                              {isCheckoutLoading && (
+                                <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                              )}
+                              {isFreePlan ? "Inclus" : isCheckoutLoading ? "Redirection..." : "Acheter"}
                             </motion.button>
-                          </motion.div>
-                        ))}
+                            </motion.div>
+                          );
+                        })}
                       </motion.div>
 
                       <motion.div
@@ -1196,6 +1292,11 @@ export default function App() {
                         <p className="text-sm text-slate-400">
                           Paiement s&eacute;curis&eacute; par <span className="font-medium text-white">Stripe</span>. Vos cr&eacute;dits sont ajout&eacute;s instantan&eacute;ment apr&egrave;s le paiement.
                         </p>
+                        {checkoutPlanId && (
+                          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-cyan-200">
+                            Ouverture du checkout Stripe en cours...
+                          </p>
+                        )}
                       </motion.div>
                     </motion.div>
                   ) : activeView === "admin" && user?.role === "ADMIN" ? (
