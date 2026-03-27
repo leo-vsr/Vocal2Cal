@@ -84,39 +84,22 @@ passport.deserializeUser(async (id: string, done) => {
 
 router.get("/google", passport.authenticate("google"));
 
-router.get("/google/callback", (req: Request, res: Response, next) => {
-  console.log("[oauth] Callback hit. GOOGLE_CALLBACK_URL:", process.env.GOOGLE_CALLBACK_URL);
-  console.log("[oauth] Query params:", req.query);
-
-  passport.authenticate("google", (err: Error | null, user: Express.User | false, info: unknown) => {
-    const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
-
-    if (err) {
-      console.error("[oauth] Authentication error:", err.message, err);
-      return res.redirect(`${clientUrl}?oauth_error=${encodeURIComponent(err.message)}`);
-    }
-
-    if (!user) {
-      console.error("[oauth] No user returned. Info:", info);
-      return res.redirect(`${clientUrl}?oauth_error=${encodeURIComponent("no_user: " + JSON.stringify(info))}`);
-    }
-
-    req.logIn(user, (loginErr) => {
-      if (loginErr) {
-        console.error("[oauth] Login error:", loginErr);
-        return res.redirect(clientUrl);
-      }
-
-      const userId = (user as { id: string }).id;
+router.get(
+  "/google/callback",
+  passport.authenticate("google", { failureRedirect: "/" }),
+  (req: Request, res: Response) => {
+    if (req.user) {
+      const userId = (req.user as { id: string }).id;
       req.session.userId = userId;
       setAuthCookie(res, userId);
+    }
 
-      req.session.save(() => {
-        res.redirect(clientUrl);
-      });
+    req.session.save(() => {
+      const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+      res.redirect(clientUrl);
     });
-  })(req, res, next);
-});
+  }
+);
 
 router.get("/me", async (req: Request, res: Response) => {
   const userId = getAuthenticatedUserId(req);
