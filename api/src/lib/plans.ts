@@ -9,22 +9,22 @@ export const PLANS = {
   STARTER: {
     name: "Starter",
     price: 499, // cents
-    credits: 50,
-    description: "50 crédits / mois",
+    credits: 40,
+    description: "Pack de 40 demandes traitées",
     stripePriceId: process.env.STRIPE_PRICE_STARTER || null,
   },
   PRO: {
     name: "Pro",
     price: 999,
-    credits: 200,
-    description: "200 crédits / mois",
+    credits: 150,
+    description: "Pack de 150 demandes traitées",
     stripePriceId: process.env.STRIPE_PRICE_PRO || null,
   },
   BUSINESS: {
     name: "Business",
     price: 1999,
-    credits: 1000,
-    description: "1000 crédits / mois",
+    credits: 500,
+    description: "Pack de 500 demandes traitées",
     stripePriceId: process.env.STRIPE_PRICE_BUSINESS || null,
   },
 } as const;

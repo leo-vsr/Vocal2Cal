@@ -59,8 +59,9 @@ async function getAdminStats() {
     }),
   ]);
 
-  // Estimate API cost: ~$0.0001 per call (Gemini Flash)
-  const estimatedApiCostPerCall = 0.0001;
+  // Conservative estimate for one processed request with Gemini 3.1 Flash-Lite:
+  // audio transcription when needed + event parsing + structured response.
+  const estimatedApiCostPerCall = 0.001;
   const estimatedTotalApiCost = totalActions * estimatedApiCostPerCall;
   const estimatedMonthApiCost = actionsMonth * estimatedApiCostPerCall;
 

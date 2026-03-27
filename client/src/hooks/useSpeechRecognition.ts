@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
-type SpeechMode = "native" | "recording" | "unsupported";
+type SpeechMode = "recording" | "unsupported";
 
 const FALLBACK_MIME_TYPES = [
   "audio/ogg;codecs=opus",
@@ -13,10 +13,6 @@ const FALLBACK_MIME_TYPES = [
 function getSpeechMode(): SpeechMode {
   if (typeof window === "undefined") {
     return "unsupported";
-  }
-
-  if ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) {
-    return "native";
   }
 
   const hasAudioRecorder =
@@ -65,7 +61,6 @@ export function useSpeechRecognition() {
   const [isListening, setIsListening] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -136,52 +131,8 @@ export function useSpeechRecognition() {
   const startListening = useCallback(async () => {
     if (mode === "unsupported") {
       setError(
-        "La dictée n'est pas disponible sur ce navigateur. Utilisez un navigateur compatible avec le micro."
+        "La dictée n'est pas disponible sur ce navigateur. Vérifiez l'accès au micro ou utilisez un navigateur plus récent."
       );
-      return;
-    }
-
-    setTranscript("");
-    setError(null);
-
-    if (mode === "native") {
-      const SpeechRecognitionAPI =
-        window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognition = new SpeechRecognitionAPI();
-      recognition.lang = "fr-FR";
-      recognition.continuous = true;
-      recognition.interimResults = true;
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setError(null);
-      };
-
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        let finalTranscript = "";
-        for (let i = 0; i < event.results.length; i++) {
-          finalTranscript += event.results[i][0].transcript;
-        }
-        setTranscript(finalTranscript);
-      };
-
-      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        if (event.error === "not-allowed") {
-          setError("Accès au microphone refusé. Vérifiez les permissions.");
-        } else if (event.error === "no-speech") {
-          setError("Aucune voix détectée. Réessayez.");
-        } else {
-          setError(`Erreur : ${event.error}`);
-        }
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
       return;
     }
 
@@ -190,6 +141,9 @@ export function useSpeechRecognition() {
       setError("Ce navigateur ne propose pas un format audio compatible pour la dictée.");
       return;
     }
+
+    setTranscript("");
+    setError(null);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -232,22 +186,14 @@ export function useSpeechRecognition() {
   }, [cleanupMediaStream, mode, transcribeRecordedAudio]);
 
   const stopListening = useCallback(() => {
-    if (mode === "native") {
-      recognitionRef.current?.stop();
+    const mediaRecorder = mediaRecorderRef.current;
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
+    } else {
+      cleanupMediaStream();
       setIsListening(false);
-      return;
     }
-
-    if (mode === "recording") {
-      const mediaRecorder = mediaRecorderRef.current;
-      if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        mediaRecorder.stop();
-      } else {
-        cleanupMediaStream();
-        setIsListening(false);
-      }
-    }
-  }, [cleanupMediaStream, mode]);
+  }, [cleanupMediaStream]);
 
   const resetTranscript = useCallback(() => {
     setTranscript("");
@@ -256,7 +202,6 @@ export function useSpeechRecognition() {
 
   useEffect(() => {
     return () => {
-      recognitionRef.current?.abort();
       const mediaRecorder = mediaRecorderRef.current;
       if (mediaRecorder && mediaRecorder.state !== "inactive") {
         mediaRecorder.stop();

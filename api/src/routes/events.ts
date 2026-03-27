@@ -151,22 +151,6 @@ router.post("/transcribe-audio", requireAuth, requireCredits, async (req: Reques
   try {
     const transcript = await transcribeAudioToText(audioBase64, normalizedMimeType);
 
-    // Deduct 1 credit
-    const userId = req.session.userId!;
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { credits: { decrement: 1 } },
-    });
-    await prisma.creditTransaction.create({
-      data: {
-        userId,
-        type: "USAGE",
-        amount: -1,
-        balance: updatedUser.credits,
-        description: "Transcription audio",
-      },
-    });
-
     res.json({ transcript });
   } catch (error) {
     console.error("Erreur transcribe-audio:", error);

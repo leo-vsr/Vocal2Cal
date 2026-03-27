@@ -6,8 +6,12 @@ export interface ParsedEvent {
   description?: string;
 }
 
-function getGeminiModel() {
-  return process.env.GEMINI_MODEL || "gemini-2.5-flash";
+function getGeminiParseModel() {
+  return process.env.GEMINI_PARSE_MODEL || process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+}
+
+function getGeminiTranscribeModel() {
+  return process.env.GEMINI_TRANSCRIBE_MODEL || process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
 }
 
 function getGeminiApiKey() {
@@ -18,9 +22,13 @@ function getGeminiApiKey() {
   return process.env.GEMINI_API_KEY;
 }
 
-async function generateTextFromGemini(parts: Array<Record<string, unknown>>, responseMimeType = "text/plain") {
+async function generateTextFromGemini(
+  model: string,
+  parts: Array<Record<string, unknown>>,
+  responseMimeType = "text/plain"
+) {
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(getGeminiModel())}:generateContent?key=${encodeURIComponent(getGeminiApiKey())}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(getGeminiApiKey())}`,
     {
       method: "POST",
       headers: {
@@ -88,7 +96,7 @@ Règles :
 Réponds UNIQUEMENT avec le tableau JSON brut valide (guillemets doubles, pas de virgule trailing), sans markdown, sans backticks, sans explication. Exemple de format attendu :
 [{"title":"Coiffeur","date":"2026-03-06","startTime":"14:00","endTime":"15:00","description":""}]`;
 
-  const responseText = (await generateTextFromGemini([{ text: prompt }], "application/json")) || "[]";
+  const responseText = (await generateTextFromGemini(getGeminiParseModel(), [{ text: prompt }], "application/json")) || "[]";
 
   console.log("Gemini raw response:", responseText);
 
@@ -121,7 +129,7 @@ Règles :
 - N'ajoute aucune explication.
 - Si l'audio est vide ou incompréhensible, réponds avec une chaîne vide.`;
 
-  const responseText = await generateTextFromGemini([
+  const responseText = await generateTextFromGemini(getGeminiTranscribeModel(), [
     { text: prompt },
     {
       inlineData: {
