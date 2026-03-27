@@ -80,9 +80,9 @@ const PLAN_LABELS = {
 
 const PRICING_PLANS = [
   { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Offerts à l'inscription", popular: false },
-  { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "50 crédits", desc: "Usage occasionnel", popular: false },
-  { id: "PRO", name: "Pro", price: "9,99€", period: "/mois", credits: "200 crédits", desc: "Usage régulier", popular: true },
-  { id: "BUSINESS", name: "Business", price: "19,99€", period: "/mois", credits: "1000 crédits", desc: "Usage intensif", popular: false },
+  { id: "STARTER", name: "Starter", price: "4,99€", period: "", credits: "40 crédits", desc: "Usage occasionnel", popular: false },
+  { id: "PRO", name: "Pro", price: "9,99€", period: "", credits: "150 crédits", desc: "Usage régulier", popular: true },
+  { id: "BUSINESS", name: "Business", price: "19,99€", period: "", credits: "500 crédits", desc: "Usage intensif", popular: false },
 ] as const;
 
 type AppView = "home" | "dashboard" | "pricing" | "admin";
@@ -728,10 +728,10 @@ export default function App() {
                   >
                     <p className="text-[11px] uppercase tracking-[0.3em] text-fuchsia-300">Tarifs</p>
                     <h3 className="mt-3 text-2xl font-bold tracking-tight text-white sm:text-4xl">
-                      Un cr&eacute;dit, un appel IA
+                      Un cr&eacute;dit, une demande
                     </h3>
                     <p className="mx-auto mt-3 max-w-lg text-sm leading-7 text-slate-400">
-                      Chaque dictée ou transcription consomme 1 crédit. Choisissez le plan qui correspond à votre usage.
+                      Chaque demande traitée consomme 1 crédit, qu&apos;elle soit dictée ou saisie au clavier.
                     </p>
                   </motion.div>
 
@@ -1212,7 +1212,7 @@ export default function App() {
                           Rechargez vos cr&eacute;dits
                         </h2>
                         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                          1 cr&eacute;dit = 1 appel IA (dict&eacute;e vocale ou transcription). Choisissez le pack adapt&eacute; &agrave; votre usage.
+                          1 cr&eacute;dit = 1 demande compl&egrave;te trait&eacute;e, en voix ou en texte. Choisissez le pack adapt&eacute; &agrave; votre usage.
                         </p>
                       </motion.section>
 
