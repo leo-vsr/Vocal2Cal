@@ -86,3 +86,11 @@ export function isUpgradePlan(currentPlan: PlanKey, targetPlan: PlanKey) {
 export function getPlanCreditDelta(currentPlan: PlanKey, targetPlan: PlanKey) {
   return Math.max(0, PLANS[targetPlan].credits - PLANS[currentPlan].credits);
 }
+
+export function getPaidPlanKeyByStripePriceId(priceId?: string | null): PaidPlanKey | undefined {
+  if (!priceId) {
+    return undefined;
+  }
+
+  return PAID_PLAN_KEYS.find((planKey) => PLANS[planKey].stripePriceId === priceId);
+}
