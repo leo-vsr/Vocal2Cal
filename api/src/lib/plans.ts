@@ -43,21 +43,21 @@ export const PLAN_TIERS: Record<PlanKey, number> = {
 export const TOP_UP_PACKS = {
   BOOST_20: {
     name: "Boost 20",
-    price: 399,
+    price: 199,
     credits: 20,
-    description: "Recharge ponctuelle pour terminer le mois",
+    description: "Petit appoint pour terminer le mois sans changer d'offre",
   },
   BOOST_80: {
     name: "Boost 80",
-    price: 1199,
+    price: 699,
     credits: 80,
-    description: "Recharge intermédiaire, moins avantageuse qu'un upgrade",
+    description: "Recharge souple, volontairement moins rentable qu'un abonnement",
   },
   BOOST_200: {
     name: "Boost 200",
-    price: 2499,
+    price: 1799,
     credits: 200,
-    description: "Gros appoint de crédits, pensé pour les pics d'usage",
+    description: "Gros appoint ponctuel, utile si vous êtes déjà abonné",
   },
 } as const;
 

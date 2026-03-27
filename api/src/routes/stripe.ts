@@ -174,12 +174,43 @@ async function findExistingStripeCustomerId(user: {
   email: string | null;
   stripeCustomerId: string | null;
 }) {
-  if (user.stripeCustomerId) {
-    return user.stripeCustomerId;
+  const customerIds = await listCandidateStripeCustomerIds(user);
+  const customerId = customerIds[0] ?? null;
+
+  if (!customerId) {
+    return null;
   }
 
+  if (customerId !== user.stripeCustomerId) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { stripeCustomerId: customerId },
+    });
+  }
+
+  return customerId;
+}
+
+async function listCandidateStripeCustomerIds(user: {
+  id: string;
+  email: string | null;
+  stripeCustomerId: string | null;
+}) {
+  const rankedIds: string[] = [];
+  const seen = new Set<string>();
+
+  const pushId = (id: string | null | undefined) => {
+    if (!id || seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    rankedIds.push(id);
+  };
+
+  pushId(user.stripeCustomerId);
+
   if (!user.email) {
-    return null;
+    return rankedIds;
   }
 
   const stripe = getStripe();
@@ -188,21 +219,45 @@ async function findExistingStripeCustomerId(user: {
     limit: 10,
   });
 
-  const customer =
-    customers.data.find((item) => item.metadata?.userId === user.id) ??
-    customers.data.find((item) => item.email === user.email) ??
-    null;
+  customers.data
+    .filter((customer) => customer.metadata?.userId === user.id)
+    .forEach((customer) => pushId(customer.id));
+  customers.data
+    .filter((customer) => customer.email === user.email)
+    .forEach((customer) => pushId(customer.id));
 
-  if (!customer) {
-    return null;
-  }
+  return rankedIds;
+}
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { stripeCustomerId: customer.id },
+async function listCandidateSubscriptionIds(userId: string, storedSubscriptionId: string | null) {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  const pushId = (id: string | null | undefined) => {
+    if (!id || seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    ids.push(id);
+  };
+
+  pushId(storedSubscriptionId);
+
+  const paymentSubscriptions = await prisma.payment.findMany({
+    where: {
+      userId,
+      stripeSubscriptionId: { not: null },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: { stripeSubscriptionId: true },
   });
 
-  return customer.id;
+  for (const payment of paymentSubscriptions) {
+    pushId(payment.stripeSubscriptionId);
+  }
+
+  return ids;
 }
 
 async function resolveManagedSubscription(user: {
@@ -214,11 +269,18 @@ async function resolveManagedSubscription(user: {
 }) {
   const stripe = getStripe();
   const fallbackPlan = isPaidPlanKey(user.plan) ? user.plan : undefined;
+  const candidateSubscriptionIds = await listCandidateSubscriptionIds(
+    user.id,
+    user.stripeSubscriptionId
+  );
 
-  if (user.stripeSubscriptionId) {
-    const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+  for (const subscriptionId of candidateSubscriptionIds) {
+    try {
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      if (!isUpgradableStripeSubscriptionStatus(subscription.status)) {
+        continue;
+      }
 
-    if (isUpgradableStripeSubscriptionStatus(subscription.status)) {
       await syncSubscriptionState({
         userId: user.id,
         subscription,
@@ -226,27 +288,39 @@ async function resolveManagedSubscription(user: {
         fallbackPlan,
       });
       return subscription;
+    } catch {
+      continue;
     }
   }
 
-  const customerId = await findExistingStripeCustomerId(user);
-  if (!customerId) {
+  const customerIds = await listCandidateStripeCustomerIds(user);
+  if (customerIds.length === 0) {
     return null;
   }
 
-  const subscriptions = await stripe.subscriptions.list({
-    customer: customerId,
-    status: "all",
-    limit: 10,
-  });
+  const matchingSubscriptions: Stripe.Subscription[] = [];
+  const activeSubscriptions: Stripe.Subscription[] = [];
 
-  const matchingPlanSubscription = subscriptions.data.find((item) => (
-    isUpgradableStripeSubscriptionStatus(item.status) &&
-    getPlanFromSubscription(item, fallbackPlan) === fallbackPlan
-  ));
-  const subscription =
-    matchingPlanSubscription ??
-    subscriptions.data.find((item) => isUpgradableStripeSubscriptionStatus(item.status));
+  for (const customerId of customerIds) {
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+      limit: 20,
+    });
+
+    for (const subscription of subscriptions.data) {
+      if (!isUpgradableStripeSubscriptionStatus(subscription.status)) {
+        continue;
+      }
+
+      activeSubscriptions.push(subscription);
+      if (getPlanFromSubscription(subscription, fallbackPlan) === fallbackPlan) {
+        matchingSubscriptions.push(subscription);
+      }
+    }
+  }
+
+  const subscription = matchingSubscriptions[0] ?? activeSubscriptions[0] ?? null;
   if (!subscription) {
     return null;
   }
@@ -544,6 +618,20 @@ async function handleSubscriptionCheckoutCompleted(session: Stripe.Checkout.Sess
     customerId,
     fallbackPlan,
   });
+
+  const latestInvoiceId =
+    typeof subscription.latest_invoice === "string"
+      ? subscription.latest_invoice
+      : subscription.latest_invoice?.id;
+
+  if (!latestInvoiceId) {
+    return;
+  }
+
+  const latestInvoice = await stripe.invoices.retrieve(latestInvoiceId);
+  if (latestInvoice.status === "paid") {
+    await handleInvoicePaid(latestInvoice);
+  }
 }
 
 async function handleInvoicePaid(invoice: Stripe.Invoice) {
