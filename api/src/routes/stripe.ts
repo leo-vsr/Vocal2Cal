@@ -38,6 +38,13 @@ function getStripeSubscriptionId(
   return typeof subscription === "string" ? subscription : subscription.id;
 }
 
+function getStripeScheduleId(
+  schedule: string | Stripe.SubscriptionSchedule | null
+) {
+  if (!schedule) return null;
+  return typeof schedule === "string" ? schedule : schedule.id;
+}
+
 function getStripePaymentIntentId(
   paymentIntent: string | Stripe.PaymentIntent | null
 ) {
@@ -45,7 +52,9 @@ function getStripePaymentIntentId(
   return typeof paymentIntent === "string" ? paymentIntent : paymentIntent.id;
 }
 
-function getStripePriceId(price: string | Stripe.Price | null | undefined) {
+function getStripePriceId(
+  price: string | Stripe.Price | Stripe.DeletedPrice | null | undefined
+) {
   if (!price) return null;
   return typeof price === "string" ? price : price.id;
 }
@@ -56,6 +65,19 @@ function getSubscriptionPriceId(subscription: Stripe.Subscription) {
 
 function getInvoiceLinePriceId(line: Stripe.InvoiceLineItem) {
   return getStripePriceId(line.pricing?.price_details?.price);
+}
+
+function getSchedulePhasePriceId(phase: Stripe.SubscriptionSchedule.Phase) {
+  return getStripePriceId(phase.items[0]?.price);
+}
+
+function getSubscriptionMetadata(userId: string, plan: PaidPlanKey) {
+  return {
+    purchaseType: "subscription",
+    userId,
+    plan,
+    credits: String(PLANS[plan].credits),
+  };
 }
 
 function getPlanFromSubscription(
@@ -127,8 +149,9 @@ async function ensureStripeCustomer(user: {
   name: string | null;
   stripeCustomerId: string | null;
 }) {
-  if (user.stripeCustomerId) {
-    return user.stripeCustomerId;
+  const existingCustomerId = await findExistingStripeCustomerId(user);
+  if (existingCustomerId) {
+    return existingCustomerId;
   }
 
   const stripe = getStripe();
@@ -146,8 +169,45 @@ async function ensureStripeCustomer(user: {
   return customer.id;
 }
 
+async function findExistingStripeCustomerId(user: {
+  id: string;
+  email: string | null;
+  stripeCustomerId: string | null;
+}) {
+  if (user.stripeCustomerId) {
+    return user.stripeCustomerId;
+  }
+
+  if (!user.email) {
+    return null;
+  }
+
+  const stripe = getStripe();
+  const customers = await stripe.customers.list({
+    email: user.email,
+    limit: 10,
+  });
+
+  const customer =
+    customers.data.find((item) => item.metadata?.userId === user.id) ??
+    customers.data.find((item) => item.email === user.email) ??
+    null;
+
+  if (!customer) {
+    return null;
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { stripeCustomerId: customer.id },
+  });
+
+  return customer.id;
+}
+
 async function resolveManagedSubscription(user: {
   id: string;
+  email: string | null;
   plan: PlanKey;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
@@ -169,17 +229,24 @@ async function resolveManagedSubscription(user: {
     }
   }
 
-  if (!user.stripeCustomerId) {
+  const customerId = await findExistingStripeCustomerId(user);
+  if (!customerId) {
     return null;
   }
 
   const subscriptions = await stripe.subscriptions.list({
-    customer: user.stripeCustomerId,
+    customer: customerId,
     status: "all",
     limit: 10,
   });
 
-  const subscription = subscriptions.data.find((item) => isUpgradableStripeSubscriptionStatus(item.status));
+  const matchingPlanSubscription = subscriptions.data.find((item) => (
+    isUpgradableStripeSubscriptionStatus(item.status) &&
+    getPlanFromSubscription(item, fallbackPlan) === fallbackPlan
+  ));
+  const subscription =
+    matchingPlanSubscription ??
+    subscriptions.data.find((item) => isUpgradableStripeSubscriptionStatus(item.status));
   if (!subscription) {
     return null;
   }
@@ -192,6 +259,72 @@ async function resolveManagedSubscription(user: {
   });
 
   return subscription;
+}
+
+async function resolveManagedSchedule(
+  subscription: Stripe.Subscription
+) {
+  const scheduleId = getStripeScheduleId(subscription.schedule);
+  if (!scheduleId) {
+    return null;
+  }
+
+  const stripe = getStripe();
+  const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+  if (schedule.status !== "active" && schedule.status !== "not_started") {
+    return null;
+  }
+
+  return schedule;
+}
+
+async function getOrCreateManagedSchedule(subscription: Stripe.Subscription) {
+  const existingSchedule = await resolveManagedSchedule(subscription);
+  if (existingSchedule) {
+    return existingSchedule;
+  }
+
+  const stripe = getStripe();
+  return stripe.subscriptionSchedules.create({
+    from_subscription: subscription.id,
+  });
+}
+
+async function releaseManagedScheduleIfAny(subscription: Stripe.Subscription) {
+  const schedule = await resolveManagedSchedule(subscription);
+  if (!schedule) {
+    return null;
+  }
+
+  const stripe = getStripe();
+  return stripe.subscriptionSchedules.release(schedule.id, {
+    preserve_cancel_date: false,
+  });
+}
+
+function getScheduledPlanChange(schedule: Stripe.SubscriptionSchedule, currentPlan: PaidPlanKey) {
+  const scheduledPhase = schedule.phases.find((phase) => {
+    const phasePlan = getPaidPlanKeyByStripePriceId(getSchedulePhasePriceId(phase));
+    return Boolean(
+      phasePlan &&
+      phasePlan !== currentPlan &&
+      phase.start_date > (schedule.current_phase?.start_date ?? 0)
+    );
+  });
+
+  if (!scheduledPhase) {
+    return null;
+  }
+
+  const scheduledPlan = getPaidPlanKeyByStripePriceId(getSchedulePhasePriceId(scheduledPhase));
+  if (!scheduledPlan) {
+    return null;
+  }
+
+  return {
+    plan: scheduledPlan,
+    effectiveDate: new Date(scheduledPhase.start_date * 1000).toISOString(),
+  };
 }
 
 async function getOrCreateUpgradePortalConfiguration() {
@@ -586,6 +719,7 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
     const clientUrl = getClientUrl();
     const managedSubscription = await resolveManagedSubscription({
       id: user.id,
+      email: user.email,
       plan: user.plan,
       stripeCustomerId: customerId,
       stripeSubscriptionId: user.stripeSubscriptionId,
@@ -694,6 +828,7 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       where: { id: userId },
       select: {
         id: true,
+        email: true,
         plan: true,
         credits: true,
         stripeCustomerId: true,
@@ -786,6 +921,331 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+// GET /api/stripe/subscription-state — Resolve live Stripe subscription management state
+router.get("/subscription-state", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        plan: true,
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: "Utilisateur introuvable" });
+      return;
+    }
+
+    const currentPlan = isPaidPlanKey(user.plan) ? user.plan : null;
+    if (!currentPlan) {
+      res.json({
+        hasManagedSubscription: false,
+        currentPlan: user.plan,
+        status: null,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+        cancelAt: null,
+        scheduledPlan: null,
+        scheduledPlanEffectiveDate: null,
+      });
+      return;
+    }
+
+    const subscription = await resolveManagedSubscription(user);
+    if (!subscription) {
+      res.json({
+        hasManagedSubscription: false,
+        currentPlan,
+        status: null,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+        cancelAt: null,
+        scheduledPlan: null,
+        scheduledPlanEffectiveDate: null,
+      });
+      return;
+    }
+
+    const schedule = await resolveManagedSchedule(subscription);
+    const scheduledChange = schedule ? getScheduledPlanChange(schedule, currentPlan) : null;
+
+    res.json({
+      hasManagedSubscription: true,
+      currentPlan,
+      status: subscription.status,
+      currentPeriodEnd: getSubscriptionCurrentPeriodEnd(subscription)?.toISOString() ?? null,
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      cancelAt: subscription.cancel_at ? new Date(subscription.cancel_at * 1000).toISOString() : null,
+      scheduledPlan: scheduledChange?.plan ?? null,
+      scheduledPlanEffectiveDate: scheduledChange?.effectiveDate ?? null,
+    });
+  } catch (error) {
+    console.error("Erreur récupération état abonnement Stripe:", error);
+    res.status(500).json({ error: "Impossible de récupérer l'état de l'abonnement" });
+  }
+});
+
+// POST /api/stripe/schedule-plan-change — Schedule a downgrade for the next billing cycle
+router.post("/schedule-plan-change", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { targetPlan } = req.body as { targetPlan?: string };
+
+  if (!targetPlan || !isPaidPlanKey(targetPlan)) {
+    res.status(400).json({ error: "Plan cible invalide" });
+    return;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        plan: true,
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+      },
+    });
+
+    if (!user || !isPaidPlanKey(user.plan)) {
+      res.status(409).json({ error: "Aucun abonnement actif modifiable" });
+      return;
+    }
+
+    if (user.plan === targetPlan) {
+      res.status(400).json({ error: "Vous êtes déjà sur ce plan" });
+      return;
+    }
+
+    if (isUpgradePlan(user.plan, targetPlan)) {
+      res.status(400).json({ error: "Utilisez l'upgrade immédiat pour un plan supérieur" });
+      return;
+    }
+
+    const currentSubscription = await resolveManagedSubscription(user);
+    if (!currentSubscription || !isUpgradableStripeSubscriptionStatus(currentSubscription.status)) {
+      res.status(409).json({ error: "Aucun abonnement Stripe actif à planifier" });
+      return;
+    }
+
+    const currentItem = currentSubscription.items.data[0];
+    const currentPriceId = getStripePriceId(currentItem?.price);
+    const targetPriceId = PLANS[targetPlan].stripePriceId;
+    const currentPeriodEnd = currentItem?.current_period_end;
+    const currentPeriodStart = currentItem?.current_period_start;
+
+    if (!currentItem || !currentPriceId || !targetPriceId || !currentPeriodEnd || !currentPeriodStart) {
+      res.status(400).json({ error: "Impossible de planifier ce changement pour le moment" });
+      return;
+    }
+
+    if (currentSubscription.cancel_at_period_end) {
+      const stripe = getStripe();
+      await stripe.subscriptions.update(currentSubscription.id, {
+        cancel_at_period_end: false,
+      });
+    }
+
+    const schedule = await getOrCreateManagedSchedule(currentSubscription);
+    const stripe = getStripe();
+    await stripe.subscriptionSchedules.update(schedule.id, {
+      end_behavior: "renew",
+      proration_behavior: "none",
+      phases: [
+        {
+          start_date: currentPeriodStart,
+          end_date: currentPeriodEnd,
+          items: [
+            {
+              price: currentPriceId,
+              quantity: currentItem.quantity ?? 1,
+            },
+          ],
+          metadata: getSubscriptionMetadata(user.id, user.plan),
+        },
+        {
+          start_date: currentPeriodEnd,
+          duration: { interval: "month", interval_count: 1 },
+          items: [
+            {
+              price: targetPriceId,
+              quantity: currentItem.quantity ?? 1,
+            },
+          ],
+          metadata: getSubscriptionMetadata(user.id, targetPlan),
+        },
+      ],
+    });
+
+    res.json({
+      success: true,
+      scheduledPlan: targetPlan,
+      effectiveDate: new Date(currentPeriodEnd * 1000).toISOString(),
+      message: `Votre plan ${PLANS[user.plan].name} reste actif jusqu'au ${new Date(currentPeriodEnd * 1000).toLocaleDateString("fr-FR")}. Ensuite, Stripe basculera automatiquement sur ${PLANS[targetPlan].name}.`,
+    });
+  } catch (error) {
+    console.error("Erreur planification changement de plan Stripe:", error);
+    const message = error instanceof Error ? error.message : "Impossible de planifier le changement de plan";
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/stripe/clear-scheduled-plan-change — Remove a pending downgrade and keep the current plan
+router.post("/clear-scheduled-plan-change", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        plan: true,
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+      },
+    });
+
+    if (!user || !isPaidPlanKey(user.plan)) {
+      res.status(409).json({ error: "Aucun abonnement actif modifiable" });
+      return;
+    }
+
+    const currentSubscription = await resolveManagedSubscription(user);
+    if (!currentSubscription) {
+      res.status(409).json({ error: "Aucun abonnement Stripe actif à modifier" });
+      return;
+    }
+
+    const releasedSchedule = await releaseManagedScheduleIfAny(currentSubscription);
+    if (!releasedSchedule) {
+      res.status(404).json({ error: "Aucun changement planifié à annuler" });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: `Le changement planifié a été annulé. Votre plan ${PLANS[user.plan].name} continuera à se renouveler normalement.`,
+    });
+  } catch (error) {
+    console.error("Erreur annulation changement planifié Stripe:", error);
+    const message = error instanceof Error ? error.message : "Impossible d'annuler le changement planifié";
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/stripe/cancel-subscription — Schedule cancellation at period end
+router.post("/cancel-subscription", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        plan: true,
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+      },
+    });
+
+    if (!user || !isPaidPlanKey(user.plan)) {
+      res.status(409).json({ error: "Aucun abonnement actif à résilier" });
+      return;
+    }
+
+    const currentSubscription = await resolveManagedSubscription(user);
+    if (!currentSubscription || !isUpgradableStripeSubscriptionStatus(currentSubscription.status)) {
+      res.status(409).json({ error: "Aucun abonnement Stripe actif à résilier" });
+      return;
+    }
+
+    await releaseManagedScheduleIfAny(currentSubscription);
+
+    const stripe = getStripe();
+    const updatedSubscription = await stripe.subscriptions.update(currentSubscription.id, {
+      cancel_at_period_end: true,
+    });
+
+    await syncSubscriptionState({
+      userId: user.id,
+      subscription: updatedSubscription,
+      customerId: getStripeCustomerId(updatedSubscription.customer),
+      fallbackPlan: user.plan,
+    });
+
+    const endDate = getSubscriptionCurrentPeriodEnd(updatedSubscription)?.toISOString() ?? null;
+    res.json({
+      success: true,
+      currentPeriodEnd: endDate,
+      message: endDate
+        ? `Votre abonnement restera actif jusqu'au ${new Date(endDate).toLocaleDateString("fr-FR")}, puis il s'arrêtera automatiquement.`
+        : "Votre résiliation a bien été programmée en fin de période.",
+    });
+  } catch (error) {
+    console.error("Erreur résiliation abonnement Stripe:", error);
+    const message = error instanceof Error ? error.message : "Impossible de programmer la résiliation";
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/stripe/resume-subscription — Undo a cancellation scheduled for period end
+router.post("/resume-subscription", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        plan: true,
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+      },
+    });
+
+    if (!user || !isPaidPlanKey(user.plan)) {
+      res.status(409).json({ error: "Aucun abonnement actif à reprendre" });
+      return;
+    }
+
+    const currentSubscription = await resolveManagedSubscription(user);
+    if (!currentSubscription) {
+      res.status(409).json({ error: "Aucun abonnement Stripe actif à reprendre" });
+      return;
+    }
+
+    const stripe = getStripe();
+    const updatedSubscription = await stripe.subscriptions.update(currentSubscription.id, {
+      cancel_at_period_end: false,
+    });
+
+    await syncSubscriptionState({
+      userId: user.id,
+      subscription: updatedSubscription,
+      customerId: getStripeCustomerId(updatedSubscription.customer),
+      fallbackPlan: user.plan,
+    });
+
+    res.json({
+      success: true,
+      message: "La résiliation planifiée a été retirée. Votre abonnement continuera normalement.",
+    });
+  } catch (error) {
+    console.error("Erreur reprise abonnement Stripe:", error);
+    const message = error instanceof Error ? error.message : "Impossible de reprendre l'abonnement";
+    res.status(500).json({ error: message });
+  }
+});
+
 // POST /api/stripe/portal — Open Stripe Billing Portal
 router.post("/portal", requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
@@ -793,17 +1253,22 @@ router.post("/portal", requireAuth, async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { stripeCustomerId: true },
+      select: {
+        id: true,
+        email: true,
+        stripeCustomerId: true,
+      },
     });
 
-    if (!user?.stripeCustomerId) {
+    const customerId = user ? await findExistingStripeCustomerId(user) : null;
+    if (!customerId) {
       res.status(404).json({ error: "Aucun compte Stripe lié" });
       return;
     }
 
     const stripe = getStripe();
     const session = await stripe.billingPortal.sessions.create({
-      customer: user.stripeCustomerId,
+      customer: customerId,
       return_url: `${getClientUrl()}?billing=return`,
     });
 
