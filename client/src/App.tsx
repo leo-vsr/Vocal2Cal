@@ -212,6 +212,24 @@ function getPlanDisplay(planId: string | null) {
   return PRICING_PLANS.find((plan) => plan.id === planId) ?? null;
 }
 
+function formatEuroCents(amount: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+  }).format(amount / 100);
+}
+
+interface PlanChangePreview {
+  mode: "upgrade" | "downgrade";
+  currentPlan: string;
+  targetPlan: string;
+  currentPeriodEnd: string | null;
+  effectiveDate: string | null;
+  nextRecurringAmount: number;
+  amountDueToday: number;
+  prorationDate: number | null;
+}
+
 function useRotatingTypewriter(phrases: string[], typeSpeed = 70, eraseSpeed = 40, startDelay = 600, holdDelay = 2200) {
   const [displayed, setDisplayed] = useState("");
   const [isTyping, setIsTyping] = useState(true);
@@ -277,6 +295,7 @@ export default function App() {
   const [subscriptionManagement, setSubscriptionManagement] = useState<SubscriptionManagementData | null>(null);
   const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
   const [pendingPlanSelection, setPendingPlanSelection] = useState<string | null>(null);
+  const [planChangePreview, setPlanChangePreview] = useState<PlanChangePreview | null>(null);
   const [cancelConfirmationOpen, setCancelConfirmationOpen] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingSuccess, setBillingSuccess] = useState<string | null>(null);
@@ -344,6 +363,7 @@ export default function App() {
           : "votre abonnement";
         setBillingSuccess(`${planName} activé. Les crédits du cycle sont en cours de synchronisation.`);
         setPendingPlanSelection(null);
+        setPlanChangePreview(null);
         setActiveView("settings");
         scheduleUsageRefresh();
       } else if (paymentType === "topup") {
@@ -369,6 +389,7 @@ export default function App() {
       setBillingSuccess(`${planName} activé. Stripe a confirmé le prorata du mois en cours.`);
       setCancelConfirmationOpen(false);
       setPendingPlanSelection(null);
+      setPlanChangePreview(null);
       setActiveView("settings");
       scheduleUsageRefresh();
       params.delete("billing");
@@ -380,6 +401,7 @@ export default function App() {
       setBillingSuccess(`${planName} est maintenant planifié pour la prochaine échéance Stripe.`);
       setCancelConfirmationOpen(false);
       setPendingPlanSelection(null);
+      setPlanChangePreview(null);
       setActiveView("settings");
       scheduleUsageRefresh();
       params.delete("billing");
@@ -387,6 +409,7 @@ export default function App() {
     } else if (billingState === "canceled") {
       setBillingSuccess("La résiliation est programmée. Votre abonnement reste actif jusqu'à la fin du cycle en cours.");
       setCancelConfirmationOpen(false);
+      setPlanChangePreview(null);
       setActiveView("settings");
       scheduleUsageRefresh();
       params.delete("billing");
@@ -605,17 +628,17 @@ export default function App() {
     setCheckoutTargetId(null);
   };
 
-  const handleChangePlan = async (targetPlanId: string) => {
+  const handleOpenPlanChangePreview = async (targetPlanId: string) => {
     if (checkoutTargetId) {
       return;
     }
 
     setBillingError(null);
     setBillingSuccess(null);
-    setCheckoutTargetId(`change:${targetPlanId}`);
+    setCheckoutTargetId(`preview:${targetPlanId}`);
 
     try {
-      const res = await fetch("/api/stripe/change-plan", {
+      const res = await fetch("/api/stripe/change-plan-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -625,14 +648,49 @@ export default function App() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (data.url) {
-        window.location.href = data.url;
+      if (!res.ok) {
+        setBillingError(data.error || "Impossible de préparer ce changement de plan");
         return;
       }
 
+      setPlanChangePreview(data as PlanChangePreview);
+    } catch {
+      setBillingError("Impossible de préparer ce changement de plan");
+    } finally {
+      setCheckoutTargetId(null);
+    }
+  };
+
+  const handleConfirmUpgrade = async () => {
+    if (!planChangePreview || planChangePreview.mode !== "upgrade" || checkoutTargetId) {
+      return;
+    }
+
+    setBillingError(null);
+    setBillingSuccess(null);
+    setCheckoutTargetId(`change:${planChangePreview.targetPlan}`);
+
+    try {
+      const res = await fetch("/api/stripe/change-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          targetPlan: planChangePreview.targetPlan,
+          prorationDate: planChangePreview.prorationDate,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setBillingError(data.error || "Impossible de changer de plan");
+        return;
       }
+
+      setBillingSuccess(data.message || "Changement de plan appliqué.");
+      setPlanChangePreview(null);
+      setUsageRefresh((value) => value + 1);
+      setActiveView("settings");
     } catch {
       setBillingError("Impossible de changer de plan");
     } finally {
@@ -643,6 +701,7 @@ export default function App() {
   const handlePrepareScheduledPlanChange = (targetPlanId: string) => {
     setBillingError(null);
     setBillingSuccess(null);
+    setPlanChangePreview(null);
     setPendingPlanSelection(targetPlanId);
   };
 
@@ -687,6 +746,7 @@ export default function App() {
 
     setBillingError(null);
     setBillingSuccess(null);
+    setPlanChangePreview(null);
     setCheckoutTargetId("clear-scheduled-plan");
 
     try {
@@ -720,6 +780,7 @@ export default function App() {
     setBillingError(null);
     setBillingSuccess(null);
     setPendingPlanSelection(null);
+    setPlanChangePreview(null);
     setCancelConfirmationOpen(false);
     setCheckoutTargetId("cancel-subscription");
 
@@ -753,6 +814,7 @@ export default function App() {
     setBillingError(null);
     setBillingSuccess(null);
     setPendingPlanSelection(null);
+    setPlanChangePreview(null);
     setCancelConfirmationOpen(false);
     setCheckoutTargetId("resume-subscription");
 
@@ -1608,6 +1670,7 @@ export default function App() {
                           const isHigherPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] > PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
                           const isLowerPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] < PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
                           const isCheckoutLoading = checkoutTargetId === `plan:${plan.id}`;
+                          const isPreviewLoading = checkoutTargetId === `preview:${plan.id}`;
                           const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
                           const isScheduledPlanChangeLoading = checkoutTargetId === `schedule:${plan.id}`;
                           const isScheduledPlan = scheduledPlanId === plan.id;
@@ -1654,7 +1717,7 @@ export default function App() {
                                 isCurrentDisplayedPlan
                                   ? undefined
                                   : isEffectivelySubscribed && isHigherPlan
-                                    ? () => handleChangePlan(plan.id)
+                                    ? () => handleOpenPlanChangePreview(plan.id)
                                     : isEffectivelySubscribed && isLowerPlan
                                       ? () => handlePrepareScheduledPlanChange(plan.id)
                                       : !isFreePlan && !isEffectivelySubscribed
@@ -1662,7 +1725,7 @@ export default function App() {
                                     : undefined
                               }
                               disabled={isDisabled}
-                              aria-busy={isCheckoutLoading || isPlanChangeLoading || isScheduledPlanChangeLoading}
+                              aria-busy={isCheckoutLoading || isPreviewLoading || isPlanChangeLoading || isScheduledPlanChangeLoading}
                               className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-colors ${
                                 isCurrentDisplayedPlan
                                   ? "bg-white/8 text-white/70 cursor-default"
@@ -1675,7 +1738,7 @@ export default function App() {
                                       : "bg-white/10 text-white hover:bg-white/15"
                               }`}
                             >
-                              {(isCheckoutLoading || isPlanChangeLoading || isScheduledPlanChangeLoading) && (
+                              {(isCheckoutLoading || isPreviewLoading || isPlanChangeLoading || isScheduledPlanChangeLoading) && (
                                 <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1687,10 +1750,10 @@ export default function App() {
                                   ? "Plan actuel"
                                   : isScheduledPlan
                                     ? "Déjà planifié"
-                                    : isPlanChangeLoading || isCheckoutLoading
+                                    : isPreviewLoading || isPlanChangeLoading || isCheckoutLoading
                                       ? "Redirection..."
-                                      : isScheduledPlanChangeLoading
-                                        ? "Planification..."
+                                    : isScheduledPlanChangeLoading
+                                      ? "Planification..."
                                       : "Passer à ce plan"}
                             </motion.button>
                             </motion.div>
@@ -2110,6 +2173,66 @@ export default function App() {
       </main>
 
       <AnimatePresence>
+        {planChangePreview && planChangePreview.mode === "upgrade" && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm"
+            onClick={() => checkoutTargetId === null && setPlanChangePreview(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.96 }}
+              transition={{ duration: 0.22, ease: smoothEase }}
+              onClick={(event) => event.stopPropagation()}
+              className="glass-strong w-full max-w-lg rounded-[28px] border border-white/10 p-6 shadow-[0_24px_80px_rgba(6,10,20,0.45)]"
+            >
+              <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Confirmation</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                Passer &agrave; {getPlanLabel(planChangePreview.targetPlan)}
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Le changement est immédiat. Stripe appliquera le prorata du cycle en cours, puis les prochains mois repartiront au tarif habituel.
+              </p>
+
+              <div className="mt-5 space-y-3">
+                <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Montant estimé dû aujourd&apos;hui</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{formatEuroCents(planChangePreview.amountDueToday)}</p>
+                </div>
+                <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
+                  À partir du <span className="font-medium text-white">{formatFrenchDate(planChangePreview.currentPeriodEnd)}</span>, votre abonnement sera renouvelé à <span className="font-medium text-white">{formatEuroCents(planChangePreview.nextRecurringAmount)}</span> par mois.
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <motion.button
+                  type="button"
+                  onClick={handleConfirmUpgrade}
+                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                  disabled={checkoutTargetId !== null}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 disabled:bg-white/10 disabled:text-white/60"
+                >
+                  {checkoutTargetId === `change:${planChangePreview.targetPlan}` ? "Application..." : "Confirmer le changement"}
+                </motion.button>
+                <motion.button
+                  type="button"
+                  onClick={() => setPlanChangePreview(null)}
+                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                  disabled={checkoutTargetId !== null}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/[0.06] disabled:bg-white/10 disabled:text-white/60"
+                >
+                  Garder mon plan actuel
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {cancelConfirmationOpen && hasPaidPlan && (
           <motion.div
             initial={{ opacity: 0 }}

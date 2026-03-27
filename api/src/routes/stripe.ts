@@ -130,6 +130,10 @@ function getSubscriptionCurrentPeriodEnd(subscription: Stripe.Subscription) {
     : null;
 }
 
+function toUnixTimestamp(date: Date) {
+  return Math.floor(date.getTime() / 1000);
+}
+
 function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
   const parent = invoice.parent;
   if (!parent || parent.type !== "subscription_details" || !parent.subscription_details) {
@@ -901,10 +905,107 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/stripe/change-plan — Open a Stripe confirmation flow for an upgrade
-router.post("/change-plan", requireAuth, async (req: Request, res: Response) => {
+// POST /api/stripe/change-plan-preview — Preview a plan change before confirmation
+router.post("/change-plan-preview", requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
   const { targetPlan } = req.body as { targetPlan?: string };
+
+  if (!targetPlan || !isPaidPlanKey(targetPlan)) {
+    res.status(400).json({ error: "Plan cible invalide" });
+    return;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        plan: true,
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+      },
+    });
+
+    if (!user || !isPaidPlanKey(user.plan)) {
+      res.status(409).json({ error: "Aucun abonnement actif modifiable" });
+      return;
+    }
+
+    if (user.plan === targetPlan) {
+      res.status(400).json({ error: "Vous êtes déjà sur ce plan" });
+      return;
+    }
+
+    const currentSubscription = await resolveManagedSubscription(user);
+    if (!currentSubscription || !isUpgradableStripeSubscriptionStatus(currentSubscription.status)) {
+      res.status(409).json({ error: "Aucun abonnement actif modifiable" });
+      return;
+    }
+
+    const currentItem = currentSubscription.items.data[0];
+    const targetPriceId = PLANS[targetPlan].stripePriceId;
+    if (!currentItem || !targetPriceId) {
+      res.status(400).json({ error: "Impossible de préparer ce changement de plan" });
+      return;
+    }
+
+    const currentPeriodEnd = getSubscriptionCurrentPeriodEnd(currentSubscription)?.toISOString() ?? null;
+    const isUpgrade = isUpgradePlan(user.plan, targetPlan);
+
+    if (!isUpgrade) {
+      res.json({
+        mode: "downgrade",
+        currentPlan: user.plan,
+        targetPlan,
+        currentPeriodEnd,
+        effectiveDate: currentPeriodEnd,
+        nextRecurringAmount: PLANS[targetPlan].price,
+        amountDueToday: 0,
+        prorationDate: null,
+      });
+      return;
+    }
+
+    const stripe = getStripe();
+    const prorationDate = toUnixTimestamp(new Date());
+    const previewInvoice = await stripe.invoices.createPreview({
+      customer: getStripeCustomerId(currentSubscription.customer) || user.stripeCustomerId || undefined,
+      subscription: currentSubscription.id,
+      subscription_details: {
+        proration_behavior: "always_invoice",
+        proration_date: prorationDate,
+        items: [
+          {
+            id: currentItem.id,
+            price: targetPriceId,
+            quantity: currentItem.quantity ?? 1,
+          },
+        ],
+      },
+    });
+
+    res.json({
+      mode: "upgrade",
+      currentPlan: user.plan,
+      targetPlan,
+      currentPeriodEnd,
+      effectiveDate: new Date(prorationDate * 1000).toISOString(),
+      nextRecurringAmount: PLANS[targetPlan].price,
+      amountDueToday: previewInvoice.amount_due || 0,
+      prorationDate,
+    });
+  } catch (error) {
+    console.error("Erreur preview changement de plan Stripe:", error);
+    const message = error instanceof Error ? error.message : "Impossible de préparer le changement de plan";
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/stripe/change-plan — Apply an immediate upgrade
+router.post("/change-plan", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { targetPlan, prorationDate } = req.body as { targetPlan?: string; prorationDate?: number };
 
   if (!targetPlan || !isPaidPlanKey(targetPlan)) {
     res.status(400).json({ error: "Plan cible invalide" });
@@ -964,39 +1065,41 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
-    const stripe = getStripe();
     const customerId = getStripeCustomerId(currentSubscription.customer) || user.stripeCustomerId;
     if (!customerId) {
       res.status(404).json({ error: "Aucun compte Stripe lié" });
       return;
     }
 
-    const portalConfigurationId = await getOrCreateUpgradePortalConfiguration();
-    const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      configuration: portalConfigurationId,
-      return_url: `${getClientUrl()}?billing=return`,
-      flow_data: {
-        type: "subscription_update_confirm",
-        after_completion: {
-          type: "redirect",
-          redirect: {
-            return_url: `${getClientUrl()}?billing=updated&plan=${targetPlan}`,
-          },
+    await releaseManagedScheduleIfAny(currentSubscription);
+
+    const stripe = getStripe();
+    const updatedSubscription = await stripe.subscriptions.update(currentSubscription.id, {
+      items: [
+        {
+          id: currentItem.id,
+          price: targetPriceId,
+          quantity: currentItem.quantity ?? 1,
         },
-        subscription_update_confirm: {
-          subscription: currentSubscription.id,
-          items: [
-            {
-              id: currentItem.id,
-              price: targetPriceId,
-            },
-          ],
-        },
-      },
+      ],
+      metadata: getSubscriptionMetadata(user.id, targetPlan),
+      proration_behavior: "always_invoice",
+      payment_behavior: "error_if_incomplete",
+      ...(typeof prorationDate === "number" ? { proration_date: prorationDate } : {}),
     });
 
-    res.json({ url: session.url });
+    await syncSubscriptionState({
+      userId: user.id,
+      subscription: updatedSubscription,
+      customerId,
+      fallbackPlan: targetPlan,
+    });
+
+    res.json({
+      success: true,
+      currentPlan: targetPlan,
+      message: `Votre plan ${PLANS[targetPlan].name} a été mis à jour. Stripe facture immédiatement le prorata du cycle en cours.`,
+    });
   } catch (error) {
     console.error("Erreur changement de plan Stripe:", error);
 
