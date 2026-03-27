@@ -57,6 +57,10 @@ function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
   return getStripeSubscriptionId(parent.subscription_details.subscription);
 }
 
+function isUpgradableStripeSubscriptionStatus(status: Stripe.Subscription.Status) {
+  return status === "active" || status === "trialing" || status === "past_due" || status === "unpaid";
+}
+
 async function ensureStripeCustomer(user: {
   id: string;
   email: string | null;
@@ -80,6 +84,54 @@ async function ensureStripeCustomer(user: {
   });
 
   return customer.id;
+}
+
+async function resolveManagedSubscription(user: {
+  id: string;
+  plan: PlanKey;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+}) {
+  const stripe = getStripe();
+  const fallbackPlan = isPaidPlanKey(user.plan) ? user.plan : undefined;
+
+  if (user.stripeSubscriptionId) {
+    const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+
+    if (isUpgradableStripeSubscriptionStatus(subscription.status)) {
+      await syncSubscriptionState({
+        userId: user.id,
+        subscription,
+        customerId: getStripeCustomerId(subscription.customer),
+        fallbackPlan,
+      });
+      return subscription;
+    }
+  }
+
+  if (!user.stripeCustomerId) {
+    return null;
+  }
+
+  const subscriptions = await stripe.subscriptions.list({
+    customer: user.stripeCustomerId,
+    status: "all",
+    limit: 10,
+  });
+
+  const subscription = subscriptions.data.find((item) => isUpgradableStripeSubscriptionStatus(item.status));
+  if (!subscription) {
+    return null;
+  }
+
+  await syncSubscriptionState({
+    userId: user.id,
+    subscription,
+    customerId: getStripeCustomerId(subscription.customer),
+    fallbackPlan,
+  });
+
+  return subscription;
 }
 
 function getSubscriptionLineItem(planKey: PaidPlanKey): Stripe.Checkout.SessionCreateParams.LineItem {
@@ -357,6 +409,7 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
         plan: true,
         credits: true,
         stripeCustomerId: true,
+        stripeSubscriptionId: true,
         subscriptionStatus: true,
       },
     });
@@ -369,6 +422,12 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
     const customerId = await ensureStripeCustomer(user);
     const stripe = getStripe();
     const clientUrl = getClientUrl();
+    const managedSubscription = await resolveManagedSubscription({
+      id: user.id,
+      plan: user.plan,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: user.stripeSubscriptionId,
+    });
 
     if (plan) {
       if (!isPaidPlanKey(plan)) {
@@ -376,7 +435,7 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
         return;
       }
 
-      if (isSubscriptionActiveStatus(user.subscriptionStatus)) {
+      if (managedSubscription && isUpgradableStripeSubscriptionStatus(managedSubscription.status)) {
         res.status(409).json({ error: "Un abonnement actif existe déjà" });
         return;
       }
@@ -458,8 +517,8 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/stripe/change-plan — Upgrade an active subscription
-router.post("/change-plan", requireAuth, async (req: Request, res: Response) => {
+// POST /api/stripe/change-plan-preview — Estimate immediate proration for an upgrade
+router.post("/change-plan-preview", requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
   const { targetPlan } = req.body as { targetPlan?: string };
 
@@ -474,7 +533,100 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       select: {
         id: true,
         plan: true,
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+      },
+    });
+
+    if (!user || !isPaidPlanKey(user.plan)) {
+      res.status(409).json({ error: "Aucun abonnement payant détecté" });
+      return;
+    }
+
+    if (user.plan === targetPlan) {
+      res.json({
+        currentPlan: user.plan,
+        targetPlan,
+        amountDue: 0,
+        currency: "eur",
+        addedCredits: 0,
+        prorationDate: null,
+      });
+      return;
+    }
+
+    if (!isUpgradePlan(user.plan, targetPlan)) {
+      res.status(400).json({ error: "Preview disponible uniquement pour un upgrade" });
+      return;
+    }
+
+    const subscription = await resolveManagedSubscription(user);
+    if (!subscription || !isUpgradableStripeSubscriptionStatus(subscription.status)) {
+      res.status(409).json({ error: "Aucun abonnement Stripe actif à prévisualiser" });
+      return;
+    }
+
+    const targetPriceId = PLANS[targetPlan].stripePriceId;
+    if (!targetPriceId) {
+      res.status(500).json({ error: "Prix Stripe manquant pour ce plan" });
+      return;
+    }
+
+    const currentItem = subscription.items.data[0];
+    if (!currentItem) {
+      res.status(404).json({ error: "Aucun item d'abonnement Stripe trouvé" });
+      return;
+    }
+
+    const prorationDate = Math.floor(Date.now() / 1000);
+    const stripe = getStripe();
+    const preview = await stripe.invoices.createPreview({
+      customer: getStripeCustomerId(subscription.customer) || undefined,
+      subscription: subscription.id,
+      subscription_details: {
+        proration_behavior: "always_invoice",
+        proration_date: prorationDate,
+        items: [
+          {
+            id: currentItem.id,
+            price: targetPriceId,
+          },
+        ],
+      },
+    });
+
+    res.json({
+      currentPlan: user.plan,
+      targetPlan,
+      amountDue: preview.amount_due || 0,
+      currency: preview.currency || "eur",
+      addedCredits: getPlanCreditDelta(user.plan, targetPlan),
+      prorationDate,
+    });
+  } catch (error) {
+    console.error("Erreur preview changement de plan Stripe:", error);
+    res.status(500).json({ error: "Impossible de prévisualiser le changement de plan" });
+  }
+});
+
+// POST /api/stripe/change-plan — Upgrade an active subscription
+router.post("/change-plan", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { targetPlan, prorationDate } = req.body as { targetPlan?: string; prorationDate?: number };
+
+  if (!targetPlan || !isPaidPlanKey(targetPlan)) {
+    res.status(400).json({ error: "Plan cible invalide" });
+    return;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        plan: true,
         credits: true,
+        stripeCustomerId: true,
         stripeSubscriptionId: true,
         subscriptionStatus: true,
       },
@@ -485,7 +637,7 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
-    if (!isPaidPlanKey(user.plan) || !isSubscriptionActiveStatus(user.subscriptionStatus) || !user.stripeSubscriptionId) {
+    if (!isPaidPlanKey(user.plan)) {
       res.status(409).json({ error: "Aucun abonnement actif modifiable" });
       return;
     }
@@ -507,7 +659,12 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
     }
 
     const stripe = getStripe();
-    const currentSubscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+    const currentSubscription = await resolveManagedSubscription(user);
+    if (!currentSubscription || !isUpgradableStripeSubscriptionStatus(currentSubscription.status)) {
+      res.status(409).json({ error: "Aucun abonnement actif modifiable" });
+      return;
+    }
+
     const currentItem = currentSubscription.items.data[0];
 
     if (!currentItem) {
@@ -515,10 +672,11 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
-    const updatedSubscription = await stripe.subscriptions.update(user.stripeSubscriptionId, {
+    const updatedSubscription = await stripe.subscriptions.update(currentSubscription.id, {
       cancel_at_period_end: false,
       payment_behavior: "error_if_incomplete",
       proration_behavior: "always_invoice",
+      ...(typeof prorationDate === "number" ? { proration_date: prorationDate } : {}),
       metadata: {
         purchaseType: "subscription",
         userId: user.id,

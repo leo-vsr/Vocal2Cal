@@ -98,6 +98,13 @@ const TOP_UP_PACKS = [
   { id: "BOOST_200", name: "Boost 200", price: "24,99€", credits: "200 crédits", desc: "Recharge d'urgence pour gros pic d'activité" },
 ] as const;
 
+type UpgradePreview = {
+  amountDue: number;
+  currency: string;
+  addedCredits: number;
+  prorationDate: number | null;
+};
+
 type AppView = "home" | "dashboard" | "pricing" | "admin";
 
 const baseViewTabs: Array<{ id: AppView; label: string; icon: string }> = [
@@ -250,6 +257,7 @@ export default function App() {
   const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingSuccess, setBillingSuccess] = useState<string | null>(null);
+  const [upgradePreviews, setUpgradePreviews] = useState<Record<string, UpgradePreview>>({});
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
   const viewTabs = user?.role === "ADMIN" ? [...baseViewTabs, adminTab] : baseViewTabs;
   const wheelDeltaRef = useRef(0);
@@ -261,6 +269,8 @@ export default function App() {
   const activePlanLabel = PLAN_LABELS[activePlanId as keyof typeof PLAN_LABELS] || activePlanId;
   const availableCredits = accountUsage?.credits ?? user?.credits ?? 0;
   const hasActiveSubscription = accountUsage?.subscription.isActive ?? false;
+  const hasPaidPlan = activePlanId !== "FREE";
+  const isEffectivelySubscribed = hasActiveSubscription || hasPaidPlan;
   const canBuyTopUp = accountUsage?.canBuyTopUp ?? false;
   const subscriptionPeriodEnd = accountUsage?.subscription.currentPeriodEnd;
   const creditAccentClass =
@@ -279,6 +289,7 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setAccountUsage(null);
+      setUpgradePreviews({});
       return;
     }
 
@@ -299,6 +310,75 @@ export default function App() {
       isMounted = false;
     };
   }, [user?.id, usageRefresh]);
+
+  useEffect(() => {
+    if (!user || !hasPaidPlan) {
+      setUpgradePreviews({});
+      return;
+    }
+
+    const candidatePlans = PRICING_PLANS.filter((plan) => {
+      const planTier = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS];
+      const activeTier = PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
+      return plan.id !== "FREE" && planTier > activeTier;
+    });
+
+    if (candidatePlans.length === 0) {
+      setUpgradePreviews({});
+      return;
+    }
+
+    let isMounted = true;
+
+    Promise.all(
+      candidatePlans.map(async (plan) => {
+        const response = await fetch("/api/stripe/change-plan-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ targetPlan: plan.id }),
+        });
+
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data || typeof data.amountDue !== "number") {
+          return null;
+        }
+
+        return [
+          plan.id,
+          {
+            amountDue: data.amountDue,
+            currency: typeof data.currency === "string" ? data.currency : "eur",
+            addedCredits: typeof data.addedCredits === "number" ? data.addedCredits : 0,
+            prorationDate: typeof data.prorationDate === "number" ? data.prorationDate : null,
+          } satisfies UpgradePreview,
+        ] as const;
+      })
+    )
+      .then((results) => {
+        if (!isMounted) {
+          return;
+        }
+
+        const nextPreviews: Record<string, UpgradePreview> = {};
+        for (const entry of results) {
+          if (!entry) {
+            continue;
+          }
+          nextPreviews[entry[0]] = entry[1];
+        }
+        setUpgradePreviews(nextPreviews);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setUpgradePreviews({});
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activePlanId, hasPaidPlan, user]);
 
   useEffect(() => {
     return () => {
@@ -482,7 +562,10 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ targetPlan: targetPlanId }),
+        body: JSON.stringify({
+          targetPlan: targetPlanId,
+          prorationDate: upgradePreviews[targetPlanId]?.prorationDate ?? undefined,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -508,6 +591,13 @@ export default function App() {
     } finally {
       setCheckoutTargetId(null);
     }
+  };
+
+  const formatCurrencyFromCents = (amountCents: number, currency: string) => {
+    return new Intl.NumberFormat("fr-FR", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(amountCents / 100);
   };
 
   return (
@@ -1363,16 +1453,18 @@ export default function App() {
                         {PRICING_PLANS.map((plan, index) => {
                           const isFreePlan = plan.id === "FREE";
                           const isCurrentPlan = activePlanId === plan.id;
-                          const isCurrentActivePlan = hasActiveSubscription && isCurrentPlan && !isFreePlan;
+                          const isCurrentDisplayedPlan = isCurrentPlan && !isFreePlan && hasPaidPlan;
                           const isHigherPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] > PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
                           const isLowerPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] < PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
+                          const upgradePreview = upgradePreviews[plan.id];
                           const isCheckoutLoading = checkoutTargetId === `plan:${plan.id}`;
                           const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
                           const isDisabled =
                             isFreePlan ||
-                            isCurrentActivePlan ||
+                            isCurrentDisplayedPlan ||
                             checkoutTargetId !== null ||
-                            (hasActiveSubscription && !isCurrentActivePlan && !isHigherPlan && !isLowerPlan);
+                            (isEffectivelySubscribed && isHigherPlan && !upgradePreview) ||
+                            (isEffectivelySubscribed && !isCurrentDisplayedPlan && !isHigherPlan && !isLowerPlan);
 
                           return (
                             <motion.div
@@ -1398,30 +1490,44 @@ export default function App() {
                               </div>
                             )}
                             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{plan.name}</p>
-                            <div className="mt-3 flex items-baseline gap-1">
-                              <span className="text-3xl font-bold text-white">{plan.price}</span>
-                              {plan.period && <span className="text-sm text-slate-500">{plan.period}</span>}
-                            </div>
+                            {isEffectivelySubscribed && isHigherPlan && upgradePreview ? (
+                              <div className="mt-3">
+                                <div className="flex items-baseline gap-2">
+                                  <span className="text-3xl font-bold text-white">
+                                    {formatCurrencyFromCents(upgradePreview.amountDue, upgradePreview.currency)}
+                                  </span>
+                                  <span className="text-sm text-cyan-200">aujourd&apos;hui</span>
+                                </div>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  Puis {plan.price}{plan.period}
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="mt-3 flex items-baseline gap-1">
+                                <span className="text-3xl font-bold text-white">{plan.price}</span>
+                                {plan.period && <span className="text-sm text-slate-500">{plan.period}</span>}
+                              </div>
+                            )}
                             <p className="mt-1 text-sm font-medium text-cyan-300">{plan.credits}</p>
                             <p className="mt-2 flex-1 text-sm text-slate-400">{plan.desc}</p>
                             <motion.button
                               whileHover={!isDisabled ? { scale: 1.03 } : undefined}
                               whileTap={!isDisabled ? { scale: 0.97 } : undefined}
                               onClick={
-                                isCurrentActivePlan
+                                isCurrentDisplayedPlan
                                   ? undefined
-                                  : hasActiveSubscription && isHigherPlan
+                                  : isEffectivelySubscribed && isHigherPlan && upgradePreview
                                     ? () => handleChangePlan(plan.id)
-                                    : hasActiveSubscription && isLowerPlan
+                                    : isEffectivelySubscribed && isLowerPlan
                                       ? handleManageSubscription
-                                      : !isFreePlan && !hasActiveSubscription
+                                      : !isFreePlan && !isEffectivelySubscribed
                                     ? () => handleCheckout({ planId: plan.id })
                                     : undefined
                               }
                               disabled={isDisabled}
                               aria-busy={isCheckoutLoading || isPlanChangeLoading}
                               className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-colors ${
-                                isCurrentActivePlan
+                                isCurrentDisplayedPlan
                                   ? "bg-white/8 text-white/70 cursor-default"
                                   : plan.popular
                                     ? "bg-white text-slate-900 hover:bg-gray-100"
@@ -1440,23 +1546,30 @@ export default function App() {
                               )}
                               {isFreePlan
                                 ? "Inclus"
-                                : isCurrentActivePlan
+                                : isCurrentDisplayedPlan
                                   ? "Plan actuel"
-                                  : hasActiveSubscription && isHigherPlan
+                                  : isEffectivelySubscribed && isHigherPlan && upgradePreview
                                     ? isPlanChangeLoading
                                       ? "Mise à jour..."
                                       : "Passer à ce plan"
-                                    : hasActiveSubscription && isLowerPlan
+                                    : isEffectivelySubscribed && isHigherPlan
+                                      ? "Calcul..."
+                                    : isEffectivelySubscribed && isLowerPlan
                                       ? "Gérer via Stripe"
-                                  : hasActiveSubscription
+                                  : isEffectivelySubscribed
                                     ? "Indisponible"
                                     : isCheckoutLoading
                                       ? "Redirection..."
                                       : "S'abonner"}
                             </motion.button>
-                            {hasActiveSubscription && isHigherPlan && (
+                            {isEffectivelySubscribed && isHigherPlan && upgradePreview && (
                               <p className="mt-3 text-xs leading-5 text-slate-500">
-                                Prorata Stripe immédiat. Votre solde actuel est conservé et le delta de crédits est ajouté.
+                                Aujourd&apos;hui : {formatCurrencyFromCents(upgradePreview.amountDue, upgradePreview.currency)} estimés. Votre solde actuel est conservé et {upgradePreview.addedCredits} crédits sont ajoutés.
+                              </p>
+                            )}
+                            {isEffectivelySubscribed && isHigherPlan && !upgradePreview && (
+                              <p className="mt-3 text-xs leading-5 text-slate-500">
+                                Calcul du prorata Stripe en cours...
                               </p>
                             )}
                             </motion.div>
