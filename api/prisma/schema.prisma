@@ -30,6 +30,11 @@ enum TransactionType {
   SUBSCRIPTION_RENEWAL
 }
 
+enum PaymentKind {
+  SUBSCRIPTION
+  TOP_UP
+}
+
 // ─── Auth Models ───────────────────────────────────────
 
 model User {
@@ -45,6 +50,9 @@ model User {
   credits           Int       @default(5)
   plan              Plan      @default(FREE)
   stripeCustomerId  String?   @unique
+  stripeSubscriptionId String? @unique
+  subscriptionStatus String?
+  subscriptionCurrentPeriodEnd DateTime?
   voiceActions      VoiceAction[]
   payments          Payment[]
   creditTransactions CreditTransaction[]
@@ -70,8 +78,11 @@ model VoiceAction {
 model Payment {
   id                String   @id @default(cuid())
   userId            String
-  stripeSessionId   String   @unique
+  kind              PaymentKind @default(TOP_UP)
+  stripeSessionId   String?  @unique
   stripePaymentId   String?
+  stripeInvoiceId   String?  @unique
+  stripeSubscriptionId String?
   plan              Plan
   amount            Int      // in cents
   currency          String   @default("eur")
