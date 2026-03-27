@@ -80,9 +80,15 @@ const PLAN_LABELS = {
 
 const PRICING_PLANS = [
   { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Offerts à l'inscription", popular: false },
-  { id: "STARTER", name: "Starter", price: "4,99€", period: "", credits: "40 crédits", desc: "Usage occasionnel", popular: false },
-  { id: "PRO", name: "Pro", price: "9,99€", period: "", credits: "150 crédits", desc: "Usage régulier", popular: true },
-  { id: "BUSINESS", name: "Business", price: "19,99€", period: "", credits: "500 crédits", desc: "Usage intensif", popular: false },
+  { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "60 crédits", desc: "Pour rester léger, sans exploser le budget", popular: false },
+  { id: "PRO", name: "Pro", price: "9,99€", period: "/mois", credits: "180 crédits", desc: "Le meilleur équilibre entre volume et prix", popular: true },
+  { id: "BUSINESS", name: "Business", price: "19,99€", period: "/mois", credits: "600 crédits", desc: "Pensé pour un usage intensif toute l'année", popular: false },
+] as const;
+
+const TOP_UP_PACKS = [
+  { id: "BOOST_20", name: "Boost 20", price: "3,99€", credits: "20 crédits", desc: "Petit appoint pour finir le mois" },
+  { id: "BOOST_80", name: "Boost 80", price: "11,99€", credits: "80 crédits", desc: "Dépannage confortable, moins rentable qu'un upgrade" },
+  { id: "BOOST_200", name: "Boost 200", price: "24,99€", credits: "200 crédits", desc: "Recharge d'urgence pour gros pic d'activité" },
 ] as const;
 
 type AppView = "home" | "dashboard" | "pricing" | "admin";
@@ -233,8 +239,9 @@ export default function App() {
   const [usageRefresh, setUsageRefresh] = useState(0);
   const [activeView, setActiveView] = useState<AppView>("home");
   const [swipeHint, setSwipeHint] = useState<SwipeDirection | null>(null);
-  const [accountUsage, setAccountUsage] = useState<Pick<UsageData, "credits" | "plan"> | null>(null);
-  const [checkoutPlanId, setCheckoutPlanId] = useState<string | null>(null);
+  const [accountUsage, setAccountUsage] = useState<UsageData | null>(null);
+  const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
+  const [billingError, setBillingError] = useState<string | null>(null);
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
   const viewTabs = user?.role === "ADMIN" ? [...baseViewTabs, adminTab] : baseViewTabs;
   const wheelDeltaRef = useRef(0);
@@ -245,6 +252,9 @@ export default function App() {
   const activePlanId = accountUsage?.plan ?? user?.plan ?? "FREE";
   const activePlanLabel = PLAN_LABELS[activePlanId as keyof typeof PLAN_LABELS] || activePlanId;
   const availableCredits = accountUsage?.credits ?? user?.credits ?? 0;
+  const hasActiveSubscription = accountUsage?.subscription.isActive ?? false;
+  const canBuyTopUp = accountUsage?.canBuyTopUp ?? false;
+  const subscriptionPeriodEnd = accountUsage?.subscription.currentPeriodEnd;
   const creditAccentClass =
     availableCredits <= 2
       ? "text-red-300"
@@ -273,10 +283,7 @@ export default function App() {
           return;
         }
 
-        setAccountUsage({
-          credits: data.credits,
-          plan: data.plan,
-        });
+        setAccountUsage(data);
       })
       .catch(() => {});
 
@@ -384,31 +391,71 @@ export default function App() {
     setViewFromSwipe(direction);
   };
 
-  const handleCheckout = async (planId: string) => {
-    if (checkoutPlanId) {
+  const handleCheckout = async (options: { planId?: string; topUpPackId?: string }) => {
+    if (checkoutTargetId) {
       return;
     }
 
-    setCheckoutPlanId(planId);
+    const targetId = options.planId ? `plan:${options.planId}` : `topup:${options.topUpPackId}`;
+    setBillingError(null);
+    setCheckoutTargetId(targetId);
 
     try {
       const res = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ plan: planId }),
+        body: JSON.stringify(
+          options.planId
+            ? { plan: options.planId }
+            : { topUpPack: options.topUpPackId }
+        ),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.url) {
         window.location.href = data.url;
         return;
       }
+
+      if (data.error) {
+        setBillingError(data.error);
+      }
     } catch {
-      // The CTA resets below so the user can retry immediately.
+      setBillingError("Impossible de lancer Stripe pour le moment");
     }
 
-    setCheckoutPlanId(null);
+    setCheckoutTargetId(null);
+  };
+
+  const handleManageSubscription = async () => {
+    if (checkoutTargetId) {
+      return;
+    }
+
+    setBillingError(null);
+    setCheckoutTargetId("portal");
+
+    try {
+      const res = await fetch("/api/stripe/portal", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+
+      if (data.error) {
+        setBillingError(data.error);
+      }
+    } catch {
+      setBillingError("Impossible d'ouvrir le portail Stripe");
+    }
+
+    setCheckoutTargetId(null);
   };
 
   return (
@@ -728,10 +775,10 @@ export default function App() {
                   >
                     <p className="text-[11px] uppercase tracking-[0.3em] text-fuchsia-300">Tarifs</p>
                     <h3 className="mt-3 text-2xl font-bold tracking-tight text-white sm:text-4xl">
-                      Un cr&eacute;dit, une demande
+                      Des abonnements pens&eacute;s pour durer
                     </h3>
                     <p className="mx-auto mt-3 max-w-lg text-sm leading-7 text-slate-400">
-                      Chaque demande traitée consomme 1 crédit, qu&apos;elle soit dictée ou saisie au clavier.
+                      Vos cr&eacute;dits se renouvellent chaque mois. Et si vous videz votre solde, une recharge ponctuelle reste possible c&ocirc;t&eacute; app.
                     </p>
                   </motion.div>
 
@@ -1209,12 +1256,50 @@ export default function App() {
                       >
                         <p className="text-xs uppercase tracking-[0.22em] text-fuchsia-300">Tarifs</p>
                         <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-                          Rechargez vos cr&eacute;dits
+                          Pilotez votre abonnement
                         </h2>
                         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                          1 cr&eacute;dit = 1 demande compl&egrave;te trait&eacute;e, en voix ou en texte. Choisissez le pack adapt&eacute; &agrave; votre usage.
+                          1 cr&eacute;dit = 1 demande compl&egrave;te. Les abonnements mensuels assurent le meilleur prix au cr&eacute;dit, et les recharges restent volontairement moins avantageuses.
                         </p>
                       </motion.section>
+
+                      {hasActiveSubscription && (
+                        <motion.section
+                          variants={fadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: 0.04 }}
+                          className="glass rounded-[26px] border border-cyan-400/15 bg-cyan-400/[0.04] p-5 sm:p-6"
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Abonnement actif</p>
+                              <h3 className="mt-1 text-xl font-semibold text-white">
+                                {activePlanLabel} en cours
+                              </h3>
+                              <p className="mt-2 text-sm leading-6 text-slate-300">
+                                {subscriptionPeriodEnd
+                                  ? `Prochain renouvellement estimé le ${new Date(subscriptionPeriodEnd).toLocaleDateString("fr-FR")}.`
+                                  : "Votre solde sera rechargé automatiquement à chaque cycle mensuel."}
+                              </p>
+                            </div>
+                            <motion.button
+                              type="button"
+                              onClick={handleManageSubscription}
+                              whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                              whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                              disabled={checkoutTargetId !== null}
+                              className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                checkoutTargetId === "portal"
+                                  ? "bg-white/10 text-white/60"
+                                  : "bg-white text-slate-900 hover:bg-slate-100"
+                              }`}
+                            >
+                              {checkoutTargetId === "portal" ? "Ouverture..." : "Gérer l'abonnement"}
+                            </motion.button>
+                          </div>
+                        </motion.section>
+                      )}
 
                       <motion.div
                         variants={fadeUp}
@@ -1226,8 +1311,13 @@ export default function App() {
                         {PRICING_PLANS.map((plan, index) => {
                           const isFreePlan = plan.id === "FREE";
                           const isCurrentPlan = activePlanId === plan.id;
-                          const isCheckoutLoading = checkoutPlanId === plan.id;
-                          const isDisabled = isFreePlan || checkoutPlanId !== null;
+                          const isCurrentActivePlan = hasActiveSubscription && isCurrentPlan && !isFreePlan;
+                          const isCheckoutLoading = checkoutTargetId === `plan:${plan.id}`;
+                          const isPortalLoading = checkoutTargetId === "portal" && isCurrentActivePlan;
+                          const isDisabled =
+                            isFreePlan ||
+                            checkoutTargetId !== null ||
+                            (hasActiveSubscription && !isCurrentPlan);
 
                           return (
                             <motion.div
@@ -1262,31 +1352,120 @@ export default function App() {
                             <motion.button
                               whileHover={!isDisabled ? { scale: 1.03 } : undefined}
                               whileTap={!isDisabled ? { scale: 0.97 } : undefined}
-                              onClick={!isFreePlan ? () => handleCheckout(plan.id) : undefined}
+                              onClick={
+                                isCurrentActivePlan
+                                  ? handleManageSubscription
+                                  : !isFreePlan && !hasActiveSubscription
+                                    ? () => handleCheckout({ planId: plan.id })
+                                    : undefined
+                              }
                               disabled={isDisabled}
-                              aria-busy={isCheckoutLoading}
+                              aria-busy={isCheckoutLoading || isPortalLoading}
                               className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-colors ${
                                 plan.popular
                                   ? "bg-white text-slate-900 hover:bg-gray-100"
                                   : isFreePlan
                                     ? "bg-white/5 text-slate-500 cursor-default"
-                                    : isDisabled
+                                  : isDisabled
                                       ? "bg-white/10 text-white/60"
                                       : "bg-white/10 text-white hover:bg-white/15"
                               }`}
                             >
-                              {isCheckoutLoading && (
+                              {(isCheckoutLoading || isPortalLoading) && (
                                 <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                 </svg>
                               )}
-                              {isFreePlan ? "Inclus" : isCheckoutLoading ? "Redirection..." : "Acheter"}
+                              {isFreePlan
+                                ? "Inclus"
+                                : isCurrentActivePlan
+                                  ? isPortalLoading
+                                    ? "Ouverture..."
+                                    : "Gérer l'abonnement"
+                                  : hasActiveSubscription
+                                    ? "Abonnement déjà actif"
+                                    : isCheckoutLoading
+                                      ? "Redirection..."
+                                      : "S'abonner"}
                             </motion.button>
                             </motion.div>
                           );
                         })}
                       </motion.div>
+
+                      {hasActiveSubscription && (
+                        <motion.section
+                          variants={fadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: 0.16 }}
+                          className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.22em] text-amber-300">Recharges</p>
+                              <h3 className="mt-1 text-xl font-semibold text-white">Crédits supplémentaires</h3>
+                              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                                Les recharges servent de filet de sécurité. Elles sont débloquées uniquement si votre abonnement est actif et que votre solde atteint zéro.
+                              </p>
+                            </div>
+                            {!canBuyTopUp && (
+                              <div className="rounded-full border border-white/8 bg-white/[0.04] px-4 py-2 text-xs uppercase tracking-[0.16em] text-slate-400">
+                                Disponible &agrave; 0 cr&eacute;dit
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                            {TOP_UP_PACKS.map((pack, index) => {
+                              const isTopUpLoading = checkoutTargetId === `topup:${pack.id}`;
+                              const isDisabled = !canBuyTopUp || checkoutTargetId !== null;
+
+                              return (
+                                <motion.div
+                                  key={pack.id}
+                                  initial={{ opacity: 0, y: 20 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ delay: 0.18 + index * 0.06, duration: 0.3 }}
+                                  className="rounded-2xl border border-white/6 bg-white/[0.02] p-5"
+                                >
+                                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{pack.name}</p>
+                                  <div className="mt-3 flex items-baseline gap-1">
+                                    <span className="text-3xl font-bold text-white">{pack.price}</span>
+                                  </div>
+                                  <p className="mt-1 text-sm font-medium text-amber-300">{pack.credits}</p>
+                                  <p className="mt-2 min-h-[3rem] text-sm text-slate-400">{pack.desc}</p>
+                                  <motion.button
+                                    whileHover={!isDisabled ? { scale: 1.03 } : undefined}
+                                    whileTap={!isDisabled ? { scale: 0.97 } : undefined}
+                                    onClick={!isDisabled ? () => handleCheckout({ topUpPackId: pack.id }) : undefined}
+                                    disabled={isDisabled}
+                                    aria-busy={isTopUpLoading}
+                                    className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-colors ${
+                                      isDisabled
+                                        ? "bg-white/10 text-white/60"
+                                        : "bg-white/10 text-white hover:bg-white/15"
+                                    }`}
+                                  >
+                                    {isTopUpLoading && (
+                                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                      </svg>
+                                    )}
+                                    {isTopUpLoading
+                                      ? "Redirection..."
+                                      : canBuyTopUp
+                                        ? "Acheter des crédits"
+                                        : "Solde positif"}
+                                  </motion.button>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        </motion.section>
+                      )}
 
                       <motion.div
                         variants={fadeUp}
@@ -1296,11 +1475,16 @@ export default function App() {
                         className="glass rounded-2xl border border-white/6 p-5 text-center"
                       >
                         <p className="text-sm text-slate-400">
-                          Paiement s&eacute;curis&eacute; par <span className="font-medium text-white">Stripe</span>. Vos cr&eacute;dits sont ajout&eacute;s instantan&eacute;ment apr&egrave;s le paiement.
+                          Paiement s&eacute;curis&eacute; par <span className="font-medium text-white">Stripe</span>. Les abonnements alimentent automatiquement le solde &agrave; chaque cycle et les recharges restent moins rentables qu&apos;une mont&eacute;e de plan.
                         </p>
-                        {checkoutPlanId && (
+                        {checkoutTargetId && (
                           <p className="mt-2 text-xs uppercase tracking-[0.18em] text-cyan-200">
                             Ouverture du checkout Stripe en cours...
+                          </p>
+                        )}
+                        {billingError && (
+                          <p className="mt-3 text-sm text-amber-200">
+                            {billingError}
                           </p>
                         )}
                       </motion.div>

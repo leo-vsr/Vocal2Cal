@@ -37,6 +37,12 @@ export interface CreditTransaction {
 export interface UsageData {
   credits: number;
   plan: string;
+  subscription: {
+    status: string | null;
+    isActive: boolean;
+    currentPeriodEnd: string | null;
+  };
+  canBuyTopUp: boolean;
   usage: {
     today: number;
     week: number;
@@ -47,6 +53,14 @@ export interface UsageData {
 }
 
 export interface PlanInfo {
+  id: string;
+  name: string;
+  price: number;
+  credits: number;
+  description: string;
+}
+
+export interface TopUpPackInfo {
   id: string;
   name: string;
   price: number;

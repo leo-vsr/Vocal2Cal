@@ -3,6 +3,7 @@ import { requireAuth, requireCredits } from "../middleware/auth";
 import { prisma } from "../lib/prisma";
 import { parseEventsFromText, transcribeAudioToText } from "../lib/gemini";
 import { getValidAccessToken, getCalendarClient, ReauthRequiredError } from "../lib/google";
+import { isSubscriptionActiveStatus } from "../lib/plans";
 
 const router = Router();
 
@@ -290,7 +291,12 @@ router.get("/usage", requireAuth, async (req: Request, res: Response) => {
   const [user, todayUsage, weekUsage, monthUsage, recentTransactions] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
-      select: { credits: true, plan: true },
+      select: {
+        credits: true,
+        plan: true,
+        subscriptionStatus: true,
+        subscriptionCurrentPeriodEnd: true,
+      },
     }),
     prisma.voiceAction.count({
       where: { userId, createdAt: { gte: startOfDay } },
@@ -311,6 +317,12 @@ router.get("/usage", requireAuth, async (req: Request, res: Response) => {
   res.json({
     credits: user?.credits ?? 0,
     plan: user?.plan ?? "FREE",
+    subscription: {
+      status: user?.subscriptionStatus ?? null,
+      isActive: isSubscriptionActiveStatus(user?.subscriptionStatus),
+      currentPeriodEnd: user?.subscriptionCurrentPeriodEnd?.toISOString() ?? null,
+    },
+    canBuyTopUp: isSubscriptionActiveStatus(user?.subscriptionStatus) && (user?.credits ?? 0) <= 0,
     usage: {
       today: todayUsage,
       week: weekUsage,
