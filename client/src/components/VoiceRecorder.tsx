@@ -45,6 +45,7 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
   const [isCooldown, setIsCooldown] = useState(false);
   const [entryMode, setEntryMode] = useState<"voice" | "text">("voice");
   const [manualPrompt, setManualPrompt] = useState("");
+  const [voiceDraft, setVoiceDraft] = useState("");
   const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleToggleRecording = useCallback(() => {
@@ -105,7 +106,7 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
   }, [onSuccess]);
 
   const handleSendToCalendar = async () => {
-    const sourceText = isAdmin && entryMode === "text" ? manualPrompt.trim() : transcript.trim();
+    const sourceText = isAdmin && entryMode === "text" ? manualPrompt.trim() : voiceDraft.trim();
     if (!sourceText) return;
 
     await submitTextToCalendar(sourceText);
@@ -113,6 +114,7 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
     if (isAdmin && entryMode === "text") {
       setManualPrompt("");
     } else {
+      setVoiceDraft("");
       resetTranscript();
     }
   };
@@ -124,6 +126,10 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
       }
     };
   }, []);
+
+  useEffect(() => {
+    setVoiceDraft(transcript);
+  }, [transcript]);
 
   useEffect(() => {
     if (!isAdmin && entryMode !== "voice") {
@@ -424,7 +430,19 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
             <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">
               Transcription
             </p>
-            <p className="text-white text-lg leading-relaxed">{transcript}</p>
+            <p className="mb-3 text-sm leading-6 text-slate-400">
+              Relisez et corrigez la dictée si nécessaire avant de créer les événements.
+            </p>
+            <textarea
+              value={voiceDraft}
+              onChange={(event) => {
+                setVoiceDraft(event.target.value);
+                setApiError(null);
+              }}
+              rows={5}
+              disabled={isProcessing}
+              className="min-h-[140px] w-full rounded-2xl border border-white/8 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-white outline-none transition-colors placeholder:text-slate-500 focus:border-cyan-300/35 disabled:opacity-70"
+            />
 
             <AnimatePresence>
               {!isListening && (
@@ -437,9 +455,9 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
                 >
                   <motion.button
                     onClick={handleSendToCalendar}
-                    disabled={isProcessing}
-                    whileHover={!isProcessing ? { scale: 1.02 } : undefined}
-                    whileTap={!isProcessing ? { scale: 0.98 } : undefined}
+                    disabled={isProcessing || voiceDraft.trim().length === 0}
+                    whileHover={!isProcessing && voiceDraft.trim().length > 0 ? { scale: 1.02 } : undefined}
+                    whileTap={!isProcessing && voiceDraft.trim().length > 0 ? { scale: 0.98 } : undefined}
                     className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
                   >
                     {isProcessing ? (
@@ -486,6 +504,7 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
                   </motion.button>
                   <motion.button
                     onClick={() => {
+                      setVoiceDraft("");
                       resetTranscript();
                       setApiError(null);
                     }}

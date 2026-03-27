@@ -78,6 +78,13 @@ const PLAN_LABELS = {
   BUSINESS: "Business",
 } as const;
 
+const PLAN_TIERS = {
+  FREE: 0,
+  STARTER: 1,
+  PRO: 2,
+  BUSINESS: 3,
+} as const;
+
 const PRICING_PLANS = [
   { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Offerts à l'inscription", popular: false },
   { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "60 crédits", desc: "Pour rester léger, sans exploser le budget", popular: false },
@@ -242,6 +249,7 @@ export default function App() {
   const [accountUsage, setAccountUsage] = useState<UsageData | null>(null);
   const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
+  const [billingSuccess, setBillingSuccess] = useState<string | null>(null);
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
   const viewTabs = user?.role === "ADMIN" ? [...baseViewTabs, adminTab] : baseViewTabs;
   const wheelDeltaRef = useRef(0);
@@ -398,6 +406,7 @@ export default function App() {
 
     const targetId = options.planId ? `plan:${options.planId}` : `topup:${options.topUpPackId}`;
     setBillingError(null);
+    setBillingSuccess(null);
     setCheckoutTargetId(targetId);
 
     try {
@@ -434,6 +443,7 @@ export default function App() {
     }
 
     setBillingError(null);
+    setBillingSuccess(null);
     setCheckoutTargetId("portal");
 
     try {
@@ -456,6 +466,48 @@ export default function App() {
     }
 
     setCheckoutTargetId(null);
+  };
+
+  const handleChangePlan = async (targetPlanId: string) => {
+    if (checkoutTargetId) {
+      return;
+    }
+
+    setBillingError(null);
+    setBillingSuccess(null);
+    setCheckoutTargetId(`change:${targetPlanId}`);
+
+    try {
+      const res = await fetch("/api/stripe/change-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ targetPlan: targetPlanId }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBillingError(data.error || "Impossible de changer de plan");
+        setCheckoutTargetId(null);
+        return;
+      }
+
+      setAccountUsage((current) => (
+        current
+          ? {
+              ...current,
+              plan: data.plan || targetPlanId,
+              credits: typeof data.credits === "number" ? data.credits : current.credits,
+            }
+          : current
+      ));
+      setUsageRefresh((value) => value + 1);
+      setBillingSuccess(data.message || "Plan mis à jour avec succès.");
+    } catch {
+      setBillingError("Impossible de changer de plan");
+    } finally {
+      setCheckoutTargetId(null);
+    }
   };
 
   return (
@@ -1312,12 +1364,15 @@ export default function App() {
                           const isFreePlan = plan.id === "FREE";
                           const isCurrentPlan = activePlanId === plan.id;
                           const isCurrentActivePlan = hasActiveSubscription && isCurrentPlan && !isFreePlan;
+                          const isHigherPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] > PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
+                          const isLowerPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] < PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
                           const isCheckoutLoading = checkoutTargetId === `plan:${plan.id}`;
-                          const isPortalLoading = checkoutTargetId === "portal" && isCurrentActivePlan;
+                          const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
                           const isDisabled =
                             isFreePlan ||
+                            isCurrentActivePlan ||
                             checkoutTargetId !== null ||
-                            (hasActiveSubscription && !isCurrentPlan);
+                            (hasActiveSubscription && !isCurrentActivePlan && !isHigherPlan && !isLowerPlan);
 
                           return (
                             <motion.div
@@ -1354,16 +1409,22 @@ export default function App() {
                               whileTap={!isDisabled ? { scale: 0.97 } : undefined}
                               onClick={
                                 isCurrentActivePlan
-                                  ? handleManageSubscription
-                                  : !isFreePlan && !hasActiveSubscription
+                                  ? undefined
+                                  : hasActiveSubscription && isHigherPlan
+                                    ? () => handleChangePlan(plan.id)
+                                    : hasActiveSubscription && isLowerPlan
+                                      ? handleManageSubscription
+                                      : !isFreePlan && !hasActiveSubscription
                                     ? () => handleCheckout({ planId: plan.id })
                                     : undefined
                               }
                               disabled={isDisabled}
-                              aria-busy={isCheckoutLoading || isPortalLoading}
+                              aria-busy={isCheckoutLoading || isPlanChangeLoading}
                               className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-colors ${
-                                plan.popular
-                                  ? "bg-white text-slate-900 hover:bg-gray-100"
+                                isCurrentActivePlan
+                                  ? "bg-white/8 text-white/70 cursor-default"
+                                  : plan.popular
+                                    ? "bg-white text-slate-900 hover:bg-gray-100"
                                   : isFreePlan
                                     ? "bg-white/5 text-slate-500 cursor-default"
                                   : isDisabled
@@ -1371,7 +1432,7 @@ export default function App() {
                                       : "bg-white/10 text-white hover:bg-white/15"
                               }`}
                             >
-                              {(isCheckoutLoading || isPortalLoading) && (
+                              {(isCheckoutLoading || isPlanChangeLoading) && (
                                 <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1380,15 +1441,24 @@ export default function App() {
                               {isFreePlan
                                 ? "Inclus"
                                 : isCurrentActivePlan
-                                  ? isPortalLoading
-                                    ? "Ouverture..."
-                                    : "Gérer l'abonnement"
+                                  ? "Plan actuel"
+                                  : hasActiveSubscription && isHigherPlan
+                                    ? isPlanChangeLoading
+                                      ? "Mise à jour..."
+                                      : "Passer à ce plan"
+                                    : hasActiveSubscription && isLowerPlan
+                                      ? "Gérer via Stripe"
                                   : hasActiveSubscription
-                                    ? "Abonnement déjà actif"
+                                    ? "Indisponible"
                                     : isCheckoutLoading
                                       ? "Redirection..."
                                       : "S'abonner"}
                             </motion.button>
+                            {hasActiveSubscription && isHigherPlan && (
+                              <p className="mt-3 text-xs leading-5 text-slate-500">
+                                Prorata Stripe immédiat. Votre solde actuel est conservé et le delta de crédits est ajouté.
+                              </p>
+                            )}
                             </motion.div>
                           );
                         })}
@@ -1480,6 +1550,11 @@ export default function App() {
                         {checkoutTargetId && (
                           <p className="mt-2 text-xs uppercase tracking-[0.18em] text-cyan-200">
                             Ouverture du checkout Stripe en cours...
+                          </p>
+                        )}
+                        {billingSuccess && (
+                          <p className="mt-3 text-sm text-emerald-300">
+                            {billingSuccess}
                           </p>
                         )}
                         {billingError && (

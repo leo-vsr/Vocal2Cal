@@ -33,6 +33,12 @@ export type PlanKey = keyof typeof PLANS;
 export type PaidPlanKey = Exclude<PlanKey, "FREE">;
 
 export const PAID_PLAN_KEYS = ["STARTER", "PRO", "BUSINESS"] as const;
+export const PLAN_TIERS: Record<PlanKey, number> = {
+  FREE: 0,
+  STARTER: 1,
+  PRO: 2,
+  BUSINESS: 3,
+};
 
 export const TOP_UP_PACKS = {
   BOOST_20: {
@@ -71,4 +77,12 @@ export function isTopUpPackKey(value: string): value is TopUpPackKey {
 
 export function isSubscriptionActiveStatus(status?: string | null) {
   return status === "active" || status === "trialing";
+}
+
+export function isUpgradePlan(currentPlan: PlanKey, targetPlan: PlanKey) {
+  return PLAN_TIERS[targetPlan] > PLAN_TIERS[currentPlan];
+}
+
+export function getPlanCreditDelta(currentPlan: PlanKey, targetPlan: PlanKey) {
+  return Math.max(0, PLANS[targetPlan].credits - PLANS[currentPlan].credits);
 }
