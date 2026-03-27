@@ -98,13 +98,6 @@ const TOP_UP_PACKS = [
   { id: "BOOST_200", name: "Boost 200", price: "24,99€", credits: "200 crédits", desc: "Recharge d'urgence pour gros pic d'activité" },
 ] as const;
 
-type UpgradePreview = {
-  amountDue: number;
-  currency: string;
-  addedCredits: number;
-  prorationDate: number | null;
-};
-
 type AppView = "home" | "dashboard" | "pricing" | "admin";
 
 const baseViewTabs: Array<{ id: AppView; label: string; icon: string }> = [
@@ -257,7 +250,6 @@ export default function App() {
   const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingSuccess, setBillingSuccess] = useState<string | null>(null);
-  const [upgradePreviews, setUpgradePreviews] = useState<Record<string, UpgradePreview>>({});
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
   const viewTabs = user?.role === "ADMIN" ? [...baseViewTabs, adminTab] : baseViewTabs;
   const wheelDeltaRef = useRef(0);
@@ -287,9 +279,31 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billingState = params.get("billing");
+    const upgradedPlan = params.get("plan");
+
+    if (billingState === "updated") {
+      const planName = upgradedPlan && upgradedPlan in PLAN_LABELS
+        ? PLAN_LABELS[upgradedPlan as keyof typeof PLAN_LABELS]
+        : "votre nouveau plan";
+      setBillingSuccess(`${planName} activé. Stripe a confirmé le prorata du mois en cours.`);
+      setUsageRefresh((value) => value + 1);
+      params.delete("billing");
+      params.delete("plan");
+
+      const nextSearch = params.toString();
+      window.history.replaceState(
+        {},
+        "",
+        `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
+      );
+    }
+  }, []);
+
+  useEffect(() => {
     if (!user) {
       setAccountUsage(null);
-      setUpgradePreviews({});
       return;
     }
 
@@ -310,75 +324,6 @@ export default function App() {
       isMounted = false;
     };
   }, [user?.id, usageRefresh]);
-
-  useEffect(() => {
-    if (!user || !hasPaidPlan) {
-      setUpgradePreviews({});
-      return;
-    }
-
-    const candidatePlans = PRICING_PLANS.filter((plan) => {
-      const planTier = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS];
-      const activeTier = PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
-      return plan.id !== "FREE" && planTier > activeTier;
-    });
-
-    if (candidatePlans.length === 0) {
-      setUpgradePreviews({});
-      return;
-    }
-
-    let isMounted = true;
-
-    Promise.all(
-      candidatePlans.map(async (plan) => {
-        const response = await fetch("/api/stripe/change-plan-preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ targetPlan: plan.id }),
-        });
-
-        const data = await response.json().catch(() => null);
-        if (!response.ok || !data || typeof data.amountDue !== "number") {
-          return null;
-        }
-
-        return [
-          plan.id,
-          {
-            amountDue: data.amountDue,
-            currency: typeof data.currency === "string" ? data.currency : "eur",
-            addedCredits: typeof data.addedCredits === "number" ? data.addedCredits : 0,
-            prorationDate: typeof data.prorationDate === "number" ? data.prorationDate : null,
-          } satisfies UpgradePreview,
-        ] as const;
-      })
-    )
-      .then((results) => {
-        if (!isMounted) {
-          return;
-        }
-
-        const nextPreviews: Record<string, UpgradePreview> = {};
-        for (const entry of results) {
-          if (!entry) {
-            continue;
-          }
-          nextPreviews[entry[0]] = entry[1];
-        }
-        setUpgradePreviews(nextPreviews);
-      })
-      .catch(() => {
-        if (isMounted) {
-          setUpgradePreviews({});
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activePlanId, hasPaidPlan, user]);
 
   useEffect(() => {
     return () => {
@@ -564,40 +509,23 @@ export default function App() {
         credentials: "include",
         body: JSON.stringify({
           targetPlan: targetPlanId,
-          prorationDate: upgradePreviews[targetPlanId]?.prorationDate ?? undefined,
         }),
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setBillingError(data.error || "Impossible de changer de plan");
-        setCheckoutTargetId(null);
+      if (data.url) {
+        window.location.href = data.url;
         return;
       }
 
-      setAccountUsage((current) => (
-        current
-          ? {
-              ...current,
-              plan: data.plan || targetPlanId,
-              credits: typeof data.credits === "number" ? data.credits : current.credits,
-            }
-          : current
-      ));
-      setUsageRefresh((value) => value + 1);
-      setBillingSuccess(data.message || "Plan mis à jour avec succès.");
+      if (!res.ok) {
+        setBillingError(data.error || "Impossible de changer de plan");
+      }
     } catch {
       setBillingError("Impossible de changer de plan");
     } finally {
       setCheckoutTargetId(null);
     }
-  };
-
-  const formatCurrencyFromCents = (amountCents: number, currency: string) => {
-    return new Intl.NumberFormat("fr-FR", {
-      style: "currency",
-      currency: currency.toUpperCase(),
-    }).format(amountCents / 100);
   };
 
   return (
@@ -1403,6 +1331,9 @@ export default function App() {
                         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
                           1 cr&eacute;dit = 1 demande compl&egrave;te. Les abonnements mensuels assurent le meilleur prix au cr&eacute;dit, et les recharges restent volontairement moins avantageuses.
                         </p>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+                          En cas de montée de plan, Stripe affiche le prorata de ce mois au moment de la confirmation, puis les prochains mois repartent au tarif habituel.
+                        </p>
                       </motion.section>
 
                       {hasActiveSubscription && (
@@ -1456,15 +1387,12 @@ export default function App() {
                           const isCurrentDisplayedPlan = isCurrentPlan && !isFreePlan && hasPaidPlan;
                           const isHigherPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] > PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
                           const isLowerPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] < PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
-                          const upgradePreview = upgradePreviews[plan.id];
                           const isCheckoutLoading = checkoutTargetId === `plan:${plan.id}`;
                           const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
                           const isDisabled =
                             isFreePlan ||
                             isCurrentDisplayedPlan ||
-                            checkoutTargetId !== null ||
-                            (isEffectivelySubscribed && isHigherPlan && !upgradePreview) ||
-                            (isEffectivelySubscribed && !isCurrentDisplayedPlan && !isHigherPlan && !isLowerPlan);
+                            checkoutTargetId !== null;
 
                           return (
                             <motion.div
@@ -1490,24 +1418,10 @@ export default function App() {
                               </div>
                             )}
                             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{plan.name}</p>
-                            {isEffectivelySubscribed && isHigherPlan && upgradePreview ? (
-                              <div className="mt-3">
-                                <div className="flex items-baseline gap-2">
-                                  <span className="text-3xl font-bold text-white">
-                                    {formatCurrencyFromCents(upgradePreview.amountDue, upgradePreview.currency)}
-                                  </span>
-                                  <span className="text-sm text-cyan-200">aujourd&apos;hui</span>
-                                </div>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  Puis {plan.price}{plan.period}
-                                </p>
-                              </div>
-                            ) : (
-                              <div className="mt-3 flex items-baseline gap-1">
-                                <span className="text-3xl font-bold text-white">{plan.price}</span>
-                                {plan.period && <span className="text-sm text-slate-500">{plan.period}</span>}
-                              </div>
-                            )}
+                            <div className="mt-3 flex items-baseline gap-1">
+                              <span className="text-3xl font-bold text-white">{plan.price}</span>
+                              {plan.period && <span className="text-sm text-slate-500">{plan.period}</span>}
+                            </div>
                             <p className="mt-1 text-sm font-medium text-cyan-300">{plan.credits}</p>
                             <p className="mt-2 flex-1 text-sm text-slate-400">{plan.desc}</p>
                             <motion.button
@@ -1516,7 +1430,7 @@ export default function App() {
                               onClick={
                                 isCurrentDisplayedPlan
                                   ? undefined
-                                  : isEffectivelySubscribed && isHigherPlan && upgradePreview
+                                  : isEffectivelySubscribed && isHigherPlan
                                     ? () => handleChangePlan(plan.id)
                                     : isEffectivelySubscribed && isLowerPlan
                                       ? handleManageSubscription
@@ -1547,13 +1461,11 @@ export default function App() {
                               {isFreePlan
                                 ? "Inclus"
                                 : isCurrentDisplayedPlan
-                                  ? "Plan actuel"
-                                  : isEffectivelySubscribed && isHigherPlan && upgradePreview
+                                ? "Plan actuel"
+                                  : isEffectivelySubscribed && isHigherPlan
                                     ? isPlanChangeLoading
-                                      ? "Mise à jour..."
+                                      ? "Redirection..."
                                       : "Passer à ce plan"
-                                    : isEffectivelySubscribed && isHigherPlan
-                                      ? "Calcul..."
                                     : isEffectivelySubscribed && isLowerPlan
                                       ? "Gérer via Stripe"
                                   : isEffectivelySubscribed
@@ -1562,16 +1474,6 @@ export default function App() {
                                       ? "Redirection..."
                                       : "S'abonner"}
                             </motion.button>
-                            {isEffectivelySubscribed && isHigherPlan && upgradePreview && (
-                              <p className="mt-3 text-xs leading-5 text-slate-500">
-                                Aujourd&apos;hui : {formatCurrencyFromCents(upgradePreview.amountDue, upgradePreview.currency)} estimés. Votre solde actuel est conservé et {upgradePreview.addedCredits} crédits sont ajoutés.
-                              </p>
-                            )}
-                            {isEffectivelySubscribed && isHigherPlan && !upgradePreview && (
-                              <p className="mt-3 text-xs leading-5 text-slate-500">
-                                Calcul du prorata Stripe en cours...
-                              </p>
-                            )}
                             </motion.div>
                           );
                         })}

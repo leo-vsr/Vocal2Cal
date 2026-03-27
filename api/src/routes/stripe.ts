@@ -4,12 +4,14 @@ import { requireAuth } from "../middleware/auth";
 import { prisma } from "../lib/prisma";
 import { getStripe } from "../lib/stripe";
 import {
+  PAID_PLAN_KEYS,
   PLANS,
   TOP_UP_PACKS,
   type PaidPlanKey,
   type PlanKey,
   type TopUpPackKey,
   getPlanCreditDelta,
+  getPaidPlanKeyByStripePriceId,
   isPaidPlanKey,
   isUpgradePlan,
   isSubscriptionActiveStatus,
@@ -17,6 +19,8 @@ import {
 } from "../lib/plans";
 
 const router = Router();
+let upgradePortalConfigurationId: string | null = null;
+let upgradePortalConfigurationSignature: string | null = null;
 
 function getClientUrl() {
   return process.env.CLIENT_URL || "http://localhost:5173";
@@ -39,6 +43,62 @@ function getStripePaymentIntentId(
 ) {
   if (!paymentIntent) return null;
   return typeof paymentIntent === "string" ? paymentIntent : paymentIntent.id;
+}
+
+function getStripePriceId(price: string | Stripe.Price | null | undefined) {
+  if (!price) return null;
+  return typeof price === "string" ? price : price.id;
+}
+
+function getSubscriptionPriceId(subscription: Stripe.Subscription) {
+  return getStripePriceId(subscription.items.data[0]?.price);
+}
+
+function getInvoiceLinePriceId(line: Stripe.InvoiceLineItem) {
+  return getStripePriceId(line.pricing?.price_details?.price);
+}
+
+function getPlanFromSubscription(
+  subscription: Stripe.Subscription,
+  fallbackPlan?: PaidPlanKey
+) {
+  const pricePlan = getPaidPlanKeyByStripePriceId(getSubscriptionPriceId(subscription));
+  if (pricePlan) {
+    return pricePlan;
+  }
+
+  const metadataPlan = subscription.metadata?.plan;
+  if (isPaidPlanKey(metadataPlan || "")) {
+    return metadataPlan as PaidPlanKey;
+  }
+
+  return fallbackPlan;
+}
+
+function getPlanChangeFromInvoice(invoice: Stripe.Invoice) {
+  let previousPlan: PaidPlanKey | undefined;
+  let previousAmount = 0;
+  let targetPlan: PaidPlanKey | undefined;
+  let targetAmount = 0;
+
+  for (const line of invoice.lines.data) {
+    const plan = getPaidPlanKeyByStripePriceId(getInvoiceLinePriceId(line));
+    if (!plan) {
+      continue;
+    }
+
+    if (line.amount < previousAmount) {
+      previousPlan = plan;
+      previousAmount = line.amount;
+    }
+
+    if (line.amount > targetAmount) {
+      targetPlan = plan;
+      targetAmount = line.amount;
+    }
+  }
+
+  return { previousPlan, targetPlan };
 }
 
 function getSubscriptionCurrentPeriodEnd(subscription: Stripe.Subscription) {
@@ -134,6 +194,83 @@ async function resolveManagedSubscription(user: {
   return subscription;
 }
 
+async function getOrCreateUpgradePortalConfiguration() {
+  const stripe = getStripe();
+  const priceIds = PAID_PLAN_KEYS.map((planKey) => PLANS[planKey].stripePriceId).filter(
+    (value): value is string => Boolean(value)
+  );
+
+  if (priceIds.length !== PAID_PLAN_KEYS.length) {
+    throw new Error("Les Price IDs Stripe des abonnements sont incomplets");
+  }
+
+  const priceSignature = [...priceIds].sort().join(",");
+  if (
+    upgradePortalConfigurationId &&
+    upgradePortalConfigurationSignature === priceSignature
+  ) {
+    return upgradePortalConfigurationId;
+  }
+
+  const existingConfigurations = await stripe.billingPortal.configurations.list({
+    limit: 20,
+  });
+
+  const reusableConfiguration = existingConfigurations.data.find(
+    (configuration) =>
+      configuration.active &&
+      configuration.metadata?.managedBy === "vocal2cal" &&
+      configuration.metadata?.configurationType === "subscription-upgrade" &&
+      configuration.metadata?.priceSignature === priceSignature
+  );
+
+  if (reusableConfiguration) {
+    upgradePortalConfigurationId = reusableConfiguration.id;
+    upgradePortalConfigurationSignature = priceSignature;
+    return reusableConfiguration.id;
+  }
+
+  const prices = await Promise.all(
+    priceIds.map((priceId) => stripe.prices.retrieve(priceId))
+  );
+  const products = new Map<string, string[]>();
+
+  for (const price of prices) {
+    const productId = typeof price.product === "string" ? price.product : price.product.id;
+    const existingPrices = products.get(productId) ?? [];
+    existingPrices.push(price.id);
+    products.set(productId, existingPrices);
+  }
+
+  const configuration = await stripe.billingPortal.configurations.create({
+    name: "Vocal2Cal Upgrade Flow",
+    default_return_url: `${getClientUrl()}?billing=return`,
+    metadata: {
+      managedBy: "vocal2cal",
+      configurationType: "subscription-upgrade",
+      priceSignature,
+    },
+    features: {
+      invoice_history: { enabled: true },
+      payment_method_update: { enabled: true },
+      subscription_update: {
+        enabled: true,
+        billing_cycle_anchor: "unchanged",
+        default_allowed_updates: ["price"],
+        proration_behavior: "always_invoice",
+        products: Array.from(products.entries()).map(([product, prices]) => ({
+          product,
+          prices,
+        })),
+      },
+    },
+  });
+
+  upgradePortalConfigurationId = configuration.id;
+  upgradePortalConfigurationSignature = priceSignature;
+  return configuration.id;
+}
+
 function getSubscriptionLineItem(planKey: PaidPlanKey): Stripe.Checkout.SessionCreateParams.LineItem {
   const planConfig = PLANS[planKey];
 
@@ -181,10 +318,7 @@ async function syncSubscriptionState(params: {
   fallbackPlan?: PaidPlanKey;
 }) {
   const { userId, subscription, customerId, fallbackPlan } = params;
-  const metadataPlan = subscription.metadata?.plan;
-  const plan: PaidPlanKey | undefined = isPaidPlanKey(metadataPlan || "")
-    ? (metadataPlan as PaidPlanKey)
-    : fallbackPlan;
+  const plan = getPlanFromSubscription(subscription, fallbackPlan);
   const shouldResetPlan =
     subscription.status === "canceled" ||
     subscription.status === "unpaid" ||
@@ -290,13 +424,13 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
   const stripe = getStripe();
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   const userId = subscription.metadata?.userId;
-  const plan = subscription.metadata?.plan;
-  const credits = parseInt(subscription.metadata?.credits || "0", 10);
+  const plan = getPlanFromSubscription(subscription);
 
-  if (!userId || !isPaidPlanKey(plan || "") || credits <= 0) {
+  if (!userId || !plan) {
     return;
   }
-  const planKey = plan as PaidPlanKey;
+  const planKey = plan;
+  const credits = PLANS[planKey].credits;
   const isPlanChangeInvoice = invoice.billing_reason === "subscription_update";
 
   await prisma.$transaction(async (tx) => {
@@ -310,18 +444,46 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
     }
 
     if (isPlanChangeInvoice) {
+      const { previousPlan, targetPlan } = getPlanChangeFromInvoice(invoice);
+      const nextPlan = targetPlan ?? planKey;
+      const addedCredits = previousPlan ? getPlanCreditDelta(previousPlan, nextPlan) : 0;
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          plan: nextPlan,
+          ...(addedCredits > 0 ? { credits: { increment: addedCredits } } : {}),
+          ...(customerId ? { stripeCustomerId: customerId } : {}),
+          stripeSubscriptionId: subscription.id,
+          subscriptionStatus: subscription.status,
+          subscriptionCurrentPeriodEnd: getSubscriptionCurrentPeriodEnd(subscription),
+        },
+      });
+
       await tx.payment.create({
         data: {
           userId,
           kind: "SUBSCRIPTION",
           stripeInvoiceId: invoice.id,
           stripeSubscriptionId: subscription.id,
-          plan: planKey,
+          plan: nextPlan,
           amount: invoice.amount_paid || invoice.amount_due || 0,
-          creditsGranted: 0,
+          creditsGranted: addedCredits,
           status: "completed",
         },
       });
+
+      if (addedCredits > 0 && previousPlan && previousPlan !== nextPlan) {
+        await tx.creditTransaction.create({
+          data: {
+            userId,
+            type: "PURCHASE",
+            amount: addedCredits,
+            balance: updatedUser.credits,
+            description: `Upgrade ${PLANS[previousPlan].name} -> ${PLANS[nextPlan].name} — +${addedCredits} crédits`,
+          },
+        });
+      }
+
       return;
     }
 
@@ -517,102 +679,10 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/stripe/change-plan-preview — Estimate immediate proration for an upgrade
-router.post("/change-plan-preview", requireAuth, async (req: Request, res: Response) => {
-  const userId = req.session.userId!;
-  const { targetPlan } = req.body as { targetPlan?: string };
-
-  if (!targetPlan || !isPaidPlanKey(targetPlan)) {
-    res.status(400).json({ error: "Plan cible invalide" });
-    return;
-  }
-
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        plan: true,
-        stripeCustomerId: true,
-        stripeSubscriptionId: true,
-      },
-    });
-
-    if (!user || !isPaidPlanKey(user.plan)) {
-      res.status(409).json({ error: "Aucun abonnement payant détecté" });
-      return;
-    }
-
-    if (user.plan === targetPlan) {
-      res.json({
-        currentPlan: user.plan,
-        targetPlan,
-        amountDue: 0,
-        currency: "eur",
-        addedCredits: 0,
-        prorationDate: null,
-      });
-      return;
-    }
-
-    if (!isUpgradePlan(user.plan, targetPlan)) {
-      res.status(400).json({ error: "Preview disponible uniquement pour un upgrade" });
-      return;
-    }
-
-    const subscription = await resolveManagedSubscription(user);
-    if (!subscription || !isUpgradableStripeSubscriptionStatus(subscription.status)) {
-      res.status(409).json({ error: "Aucun abonnement Stripe actif à prévisualiser" });
-      return;
-    }
-
-    const targetPriceId = PLANS[targetPlan].stripePriceId;
-    if (!targetPriceId) {
-      res.status(500).json({ error: "Prix Stripe manquant pour ce plan" });
-      return;
-    }
-
-    const currentItem = subscription.items.data[0];
-    if (!currentItem) {
-      res.status(404).json({ error: "Aucun item d'abonnement Stripe trouvé" });
-      return;
-    }
-
-    const prorationDate = Math.floor(Date.now() / 1000);
-    const stripe = getStripe();
-    const preview = await stripe.invoices.createPreview({
-      customer: getStripeCustomerId(subscription.customer) || undefined,
-      subscription: subscription.id,
-      subscription_details: {
-        proration_behavior: "always_invoice",
-        proration_date: prorationDate,
-        items: [
-          {
-            id: currentItem.id,
-            price: targetPriceId,
-          },
-        ],
-      },
-    });
-
-    res.json({
-      currentPlan: user.plan,
-      targetPlan,
-      amountDue: preview.amount_due || 0,
-      currency: preview.currency || "eur",
-      addedCredits: getPlanCreditDelta(user.plan, targetPlan),
-      prorationDate,
-    });
-  } catch (error) {
-    console.error("Erreur preview changement de plan Stripe:", error);
-    res.status(500).json({ error: "Impossible de prévisualiser le changement de plan" });
-  }
-});
-
-// POST /api/stripe/change-plan — Upgrade an active subscription
+// POST /api/stripe/change-plan — Open a Stripe confirmation flow for an upgrade
 router.post("/change-plan", requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
-  const { targetPlan, prorationDate } = req.body as { targetPlan?: string; prorationDate?: number };
+  const { targetPlan } = req.body as { targetPlan?: string };
 
   if (!targetPlan || !isPaidPlanKey(targetPlan)) {
     res.status(400).json({ error: "Plan cible invalide" });
@@ -658,7 +728,6 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
-    const stripe = getStripe();
     const currentSubscription = await resolveManagedSubscription(user);
     if (!currentSubscription || !isUpgradableStripeSubscriptionStatus(currentSubscription.status)) {
       res.status(409).json({ error: "Aucun abonnement actif modifiable" });
@@ -672,56 +741,39 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
-    const updatedSubscription = await stripe.subscriptions.update(currentSubscription.id, {
-      cancel_at_period_end: false,
-      payment_behavior: "error_if_incomplete",
-      proration_behavior: "always_invoice",
-      ...(typeof prorationDate === "number" ? { proration_date: prorationDate } : {}),
-      metadata: {
-        purchaseType: "subscription",
-        userId: user.id,
-        plan: targetPlan,
-        credits: String(PLANS[targetPlan].credits),
-      },
-      items: [
-        {
-          id: currentItem.id,
-          price: targetPriceId,
-        },
-      ],
-    });
-
-    const addedCredits = getPlanCreditDelta(user.plan, targetPlan);
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        plan: targetPlan,
-        credits: { increment: addedCredits },
-        stripeSubscriptionId: updatedSubscription.id,
-        subscriptionStatus: updatedSubscription.status,
-        subscriptionCurrentPeriodEnd: getSubscriptionCurrentPeriodEnd(updatedSubscription),
-      },
-    });
-
-    if (addedCredits > 0) {
-      await prisma.creditTransaction.create({
-        data: {
-          userId: user.id,
-          type: "PURCHASE",
-          amount: addedCredits,
-          balance: updatedUser.credits,
-          description: `Upgrade ${PLANS[user.plan].name} -> ${PLANS[targetPlan].name} — +${addedCredits} crédits`,
-        },
-      });
+    const customerId = getStripeCustomerId(currentSubscription.customer) || user.stripeCustomerId;
+    if (!customerId) {
+      res.status(404).json({ error: "Aucun compte Stripe lié" });
+      return;
     }
 
-    res.json({
-      success: true,
-      plan: targetPlan,
-      credits: updatedUser.credits,
-      addedCredits,
-      message: "Upgrade effectué. Stripe applique automatiquement le prorata du cycle en cours.",
+    const stripe = getStripe();
+    const portalConfigurationId = await getOrCreateUpgradePortalConfiguration();
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      configuration: portalConfigurationId,
+      return_url: `${getClientUrl()}?billing=return`,
+      flow_data: {
+        type: "subscription_update_confirm",
+        after_completion: {
+          type: "redirect",
+          redirect: {
+            return_url: `${getClientUrl()}?billing=updated&plan=${targetPlan}`,
+          },
+        },
+        subscription_update_confirm: {
+          subscription: currentSubscription.id,
+          items: [
+            {
+              id: currentItem.id,
+              price: targetPriceId,
+            },
+          ],
+        },
+      },
     });
+
+    res.json({ url: session.url });
   } catch (error) {
     console.error("Erreur changement de plan Stripe:", error);
 
