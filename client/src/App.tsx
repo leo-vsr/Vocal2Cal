@@ -444,17 +444,20 @@ export default function App() {
               transition={{ duration: 0.3 }}
               className="flex items-center gap-2 sm:gap-3"
             >
-              <div className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-slate-200 shadow-[0_10px_30px_rgba(6,10,20,0.22)] sm:hidden">
-                <span className="font-semibold text-white">{activePlanLabel}</span>
-                <span className="mx-1.5 h-1 w-1 rounded-full bg-white/20" />
-                <span className={`font-medium ${creditAccentClass}`}>{availableCredits} cr.</span>
-              </div>
-              <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1.5 shadow-[0_10px_30px_rgba(6,10,20,0.22)] sm:flex">
-                <span className="inline-flex items-center rounded-full border border-cyan-300/15 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100">
+              <div className="inline-flex h-10 items-center gap-2 rounded-[20px] border border-white/10 bg-white/[0.04] p-1 pr-3 text-[11px] text-slate-200 shadow-[0_10px_30px_rgba(6,10,20,0.22)] sm:hidden">
+                <span className="inline-flex h-8 items-center rounded-[16px] border border-cyan-300/18 bg-cyan-300/[0.08] px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-50">
                   {activePlanLabel}
                 </span>
-                <span className="text-xs text-slate-400">Cr&eacute;dits</span>
-                <span className={`text-sm font-semibold ${creditAccentClass}`}>{availableCredits}</span>
+                <span className={`text-sm font-semibold ${creditAccentClass}`}>{availableCredits} cr.</span>
+              </div>
+              <div className="hidden items-center rounded-[24px] border border-white/10 bg-white/[0.04] p-1 shadow-[0_10px_30px_rgba(6,10,20,0.22)] sm:flex">
+                <span className="inline-flex h-10 items-center rounded-[18px] border border-cyan-300/18 bg-cyan-300/[0.08] px-4 text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-50">
+                  {activePlanLabel}
+                </span>
+                <div className="flex h-10 items-center gap-3 px-4 pr-3">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Cr&eacute;dits</span>
+                  <span className={`text-2xl font-semibold leading-none ${creditAccentClass}`}>{availableCredits}</span>
+                </div>
               </div>
               {user.image && (
                 <img
@@ -1027,6 +1030,7 @@ export default function App() {
                         className="w-full"
                       >
                         <VoiceRecorder
+                          isAdmin={user.role === "ADMIN"}
                           onSuccess={() => setUsageRefresh((n) => n + 1)}
                         />
                       </motion.div>
