@@ -52,6 +52,17 @@ export interface UsageData {
   transactions: CreditTransaction[];
 }
 
+export interface SubscriptionManagementData {
+  hasManagedSubscription: boolean;
+  currentPlan: string;
+  status: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  cancelAt: string | null;
+  scheduledPlan: string | null;
+  scheduledPlanEffectiveDate: string | null;
+}
+
 export interface PlanInfo {
   id: string;
   name: string;

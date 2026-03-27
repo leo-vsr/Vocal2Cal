@@ -5,7 +5,7 @@ import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { History } from "@/components/History";
 import { UsageBar } from "@/components/UsageBar";
 import { AdminPanel } from "@/components/AdminPanel";
-import type { UsageData } from "@/types";
+import type { SubscriptionManagementData, UsageData } from "@/types";
 
 const smoothEase = [0.22, 1, 0.36, 1] as const;
 const dashboardHighlights = [
@@ -185,6 +185,22 @@ const rotatingPhrases = [
   "sans formulaire",
 ];
 
+function formatFrenchDate(date: string | null) {
+  if (!date) {
+    return null;
+  }
+
+  return new Date(date).toLocaleDateString("fr-FR");
+}
+
+function getPlanLabel(planId: string | null) {
+  if (!planId) {
+    return null;
+  }
+
+  return PLAN_LABELS[planId as keyof typeof PLAN_LABELS] || planId;
+}
+
 function useRotatingTypewriter(phrases: string[], typeSpeed = 70, eraseSpeed = 40, startDelay = 600, holdDelay = 2200) {
   const [displayed, setDisplayed] = useState("");
   const [isTyping, setIsTyping] = useState(true);
@@ -247,6 +263,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<AppView>("home");
   const [swipeHint, setSwipeHint] = useState<SwipeDirection | null>(null);
   const [accountUsage, setAccountUsage] = useState<UsageData | null>(null);
+  const [subscriptionManagement, setSubscriptionManagement] = useState<SubscriptionManagementData | null>(null);
   const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingSuccess, setBillingSuccess] = useState<string | null>(null);
@@ -265,6 +282,14 @@ export default function App() {
   const isEffectivelySubscribed = hasActiveSubscription || hasPaidPlan;
   const canBuyTopUp = accountUsage?.canBuyTopUp ?? false;
   const subscriptionPeriodEnd = accountUsage?.subscription.currentPeriodEnd;
+  const managedPeriodEnd = subscriptionManagement?.currentPeriodEnd ?? subscriptionPeriodEnd;
+  const managedPeriodEndLabel = formatFrenchDate(managedPeriodEnd ?? null);
+  const scheduledPlanId = subscriptionManagement?.scheduledPlan ?? null;
+  const scheduledPlanLabel = getPlanLabel(scheduledPlanId);
+  const scheduledPlanEffectiveDate = subscriptionManagement?.scheduledPlanEffectiveDate ?? managedPeriodEnd;
+  const scheduledPlanEffectiveLabel = formatFrenchDate(scheduledPlanEffectiveDate ?? null);
+  const cancelAtPeriodEnd = subscriptionManagement?.cancelAtPeriodEnd ?? false;
+  const hasManagedSubscription = subscriptionManagement?.hasManagedSubscription ?? false;
   const creditAccentClass =
     availableCredits <= 2
       ? "text-red-300"
@@ -304,21 +329,30 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setAccountUsage(null);
+      setSubscriptionManagement(null);
       return;
     }
 
     let isMounted = true;
 
-    fetch("/api/usage", { credentials: "include" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: UsageData | null) => {
-        if (!isMounted || !data || typeof data.credits !== "number") {
-          return;
-        }
+    Promise.all([
+      fetch("/api/usage", { credentials: "include" })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null),
+      fetch("/api/stripe/subscription-state", { credentials: "include" })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null),
+    ]).then(([usageData, subscriptionData]: [UsageData | null, SubscriptionManagementData | null]) => {
+      if (!isMounted) {
+        return;
+      }
 
-        setAccountUsage(data);
-      })
-      .catch(() => {});
+      if (usageData && typeof usageData.credits === "number") {
+        setAccountUsage(usageData);
+      }
+
+      setSubscriptionManagement(subscriptionData);
+    });
 
     return () => {
       isMounted = false;
@@ -528,6 +562,128 @@ export default function App() {
     }
   };
 
+  const handleSchedulePlanChange = async (targetPlanId: string) => {
+    if (checkoutTargetId) {
+      return;
+    }
+
+    setBillingError(null);
+    setBillingSuccess(null);
+    setCheckoutTargetId(`schedule:${targetPlanId}`);
+
+    try {
+      const res = await fetch("/api/stripe/schedule-plan-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ targetPlan: targetPlanId }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBillingError(data.error || "Impossible de planifier ce changement");
+        return;
+      }
+
+      setBillingSuccess(data.message || "Changement de plan programmé.");
+      setUsageRefresh((value) => value + 1);
+    } catch {
+      setBillingError("Impossible de planifier ce changement");
+    } finally {
+      setCheckoutTargetId(null);
+    }
+  };
+
+  const handleClearScheduledPlanChange = async () => {
+    if (checkoutTargetId) {
+      return;
+    }
+
+    setBillingError(null);
+    setBillingSuccess(null);
+    setCheckoutTargetId("clear-scheduled-plan");
+
+    try {
+      const res = await fetch("/api/stripe/clear-scheduled-plan-change", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBillingError(data.error || "Impossible d'annuler le changement planifié");
+        return;
+      }
+
+      setBillingSuccess(data.message || "Changement planifié annulé.");
+      setUsageRefresh((value) => value + 1);
+    } catch {
+      setBillingError("Impossible d'annuler le changement planifié");
+    } finally {
+      setCheckoutTargetId(null);
+    }
+  };
+
+  const handleCancelSubscription = async () => {
+    if (checkoutTargetId) {
+      return;
+    }
+
+    setBillingError(null);
+    setBillingSuccess(null);
+    setCheckoutTargetId("cancel-subscription");
+
+    try {
+      const res = await fetch("/api/stripe/cancel-subscription", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBillingError(data.error || "Impossible de programmer la résiliation");
+        return;
+      }
+
+      setBillingSuccess(data.message || "Résiliation programmée.");
+      setUsageRefresh((value) => value + 1);
+    } catch {
+      setBillingError("Impossible de programmer la résiliation");
+    } finally {
+      setCheckoutTargetId(null);
+    }
+  };
+
+  const handleResumeSubscription = async () => {
+    if (checkoutTargetId) {
+      return;
+    }
+
+    setBillingError(null);
+    setBillingSuccess(null);
+    setCheckoutTargetId("resume-subscription");
+
+    try {
+      const res = await fetch("/api/stripe/resume-subscription", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBillingError(data.error || "Impossible de reprendre l'abonnement");
+        return;
+      }
+
+      setBillingSuccess(data.message || "Abonnement réactivé.");
+      setUsageRefresh((value) => value + 1);
+    } catch {
+      setBillingError("Impossible de reprendre l'abonnement");
+    } finally {
+      setCheckoutTargetId(null);
+    }
+  };
+
   return (
     <div className="app-shell min-h-dvh flex flex-col safe-top safe-bottom safe-x">
       {/* Header */}
@@ -561,14 +717,22 @@ export default function App() {
               transition={{ duration: 0.3 }}
               className="flex items-center gap-2 sm:gap-3"
             >
-              <div className="inline-flex items-center gap-2 rounded-lg bg-white/[0.04] px-2.5 py-1 sm:hidden">
+              <button
+                type="button"
+                onClick={() => setActiveView("pricing")}
+                className="inline-flex items-center gap-2 rounded-lg bg-white/[0.04] px-2.5 py-1 transition-colors hover:bg-white/[0.07] sm:hidden"
+              >
                 <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-amber-200/70">
                   {activePlanLabel}
                 </span>
                 <span className="text-[8px] text-white/15">&#x2022;</span>
                 <span className={`text-[11px] font-semibold tabular-nums tracking-wide ${creditAccentClass}`}>{availableCredits}</span>
-              </div>
-              <div className="hidden items-center gap-3.5 rounded-xl bg-white/[0.04] px-4 py-1.5 sm:flex">
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveView("pricing")}
+                className="hidden items-center gap-3.5 rounded-xl bg-white/[0.04] px-4 py-1.5 transition-colors hover:bg-white/[0.07] sm:flex"
+              >
                 <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-200/70">
                   {activePlanLabel}
                 </span>
@@ -577,7 +741,7 @@ export default function App() {
                   <span className={`text-[15px] font-semibold tabular-nums leading-none tracking-tight ${creditAccentClass}`}>{availableCredits}</span>
                   <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-slate-500">cr</span>
                 </div>
-              </div>
+              </button>
               {user.image && (
                 <img
                   src={user.image}
@@ -1336,7 +1500,7 @@ export default function App() {
                         </p>
                       </motion.section>
 
-                      {hasActiveSubscription && (
+                      {hasPaidPlan && (
                         <motion.section
                           variants={fadeUp}
                           initial="hidden"
@@ -1344,32 +1508,96 @@ export default function App() {
                           transition={{ delay: 0.04 }}
                           className="glass rounded-[26px] border border-cyan-400/15 bg-cyan-400/[0.04] p-5 sm:p-6"
                         >
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                              <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Abonnement actif</p>
+                              <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Abonnement</p>
                               <h3 className="mt-1 text-xl font-semibold text-white">
                                 {activePlanLabel} en cours
                               </h3>
-                              <p className="mt-2 text-sm leading-6 text-slate-300">
-                                {subscriptionPeriodEnd
-                                  ? `Prochain renouvellement estimé le ${new Date(subscriptionPeriodEnd).toLocaleDateString("fr-FR")}.`
-                                  : "Votre solde sera rechargé automatiquement à chaque cycle mensuel."}
-                              </p>
+                              {!hasManagedSubscription ? (
+                                <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
+                                  Le plan local est bien connu, mais l&apos;abonnement Stripe n&apos;a pas encore pu &ecirc;tre rattach&eacute; automatiquement. Si vous venez d&apos;activer un abonnement, attendez le webhook Stripe ou rechargez la page.
+                                </p>
+                              ) : cancelAtPeriodEnd && managedPeriodEndLabel ? (
+                                <p className="mt-2 max-w-2xl text-sm leading-6 text-rose-100/90">
+                                  La r&eacute;siliation est programm&eacute;e. Vous gardez tous les avantages {activePlanLabel} jusqu&apos;au {managedPeriodEndLabel}, puis l&apos;abonnement s&apos;arr&ecirc;tera.
+                                </p>
+                              ) : scheduledPlanLabel && scheduledPlanEffectiveLabel ? (
+                                <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
+                                  Vous restez sur {activePlanLabel} jusqu&apos;au {scheduledPlanEffectiveLabel}, puis Stripe basculera automatiquement sur {scheduledPlanLabel} et les avantages associ&eacute;s.
+                                </p>
+                              ) : managedPeriodEndLabel ? (
+                                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                                  Prochain renouvellement estim&eacute; le {managedPeriodEndLabel}. Votre solde sera recharg&eacute; automatiquement &agrave; chaque cycle mensuel.
+                                </p>
+                              ) : (
+                                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                                  Votre abonnement reste actif et vos cr&eacute;dits se rechargent automatiquement &agrave; chaque cycle mensuel.
+                                </p>
+                              )}
                             </div>
-                            <motion.button
-                              type="button"
-                              onClick={handleManageSubscription}
-                              whileHover={checkoutTargetId ? undefined : { y: -2 }}
-                              whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
-                              disabled={checkoutTargetId !== null}
-                              className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
-                                checkoutTargetId === "portal"
-                                  ? "bg-white/10 text-white/60"
-                                  : "bg-white text-slate-900 hover:bg-slate-100"
-                              }`}
-                            >
-                              {checkoutTargetId === "portal" ? "Ouverture..." : "Gérer l'abonnement"}
-                            </motion.button>
+                            <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[220px]">
+                              {scheduledPlanLabel ? (
+                                <motion.button
+                                  type="button"
+                                  onClick={handleClearScheduledPlanChange}
+                                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                                  disabled={checkoutTargetId !== null}
+                                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                    checkoutTargetId === "clear-scheduled-plan"
+                                      ? "bg-white/10 text-white/60"
+                                      : "bg-white text-slate-900 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  {checkoutTargetId === "clear-scheduled-plan" ? "Annulation..." : "Annuler le changement planifié"}
+                                </motion.button>
+                              ) : cancelAtPeriodEnd ? (
+                                <motion.button
+                                  type="button"
+                                  onClick={handleResumeSubscription}
+                                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                                  disabled={checkoutTargetId !== null}
+                                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                    checkoutTargetId === "resume-subscription"
+                                      ? "bg-white/10 text-white/60"
+                                      : "bg-white text-slate-900 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  {checkoutTargetId === "resume-subscription" ? "Réactivation..." : "Réactiver l'abonnement"}
+                                </motion.button>
+                              ) : (
+                                <motion.button
+                                  type="button"
+                                  onClick={handleCancelSubscription}
+                                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                                  disabled={checkoutTargetId !== null || !hasManagedSubscription}
+                                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                    checkoutTargetId === "cancel-subscription"
+                                      ? "bg-white/10 text-white/60"
+                                      : "bg-white text-slate-900 hover:bg-slate-100"
+                                  } disabled:bg-white/10 disabled:text-white/60`}
+                                >
+                                  {checkoutTargetId === "cancel-subscription" ? "Programmation..." : "Programmer la résiliation"}
+                                </motion.button>
+                              )}
+                              <motion.button
+                                type="button"
+                                onClick={handleManageSubscription}
+                                whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                                whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                                disabled={checkoutTargetId !== null || !hasManagedSubscription}
+                                className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                  checkoutTargetId === "portal"
+                                    ? "bg-white/10 text-white/60"
+                                    : "bg-white/10 text-white hover:bg-white/15"
+                                } disabled:bg-white/10 disabled:text-white/60`}
+                              >
+                                {checkoutTargetId === "portal" ? "Ouverture..." : "Paiement et factures"}
+                              </motion.button>
+                            </div>
                           </div>
                         </motion.section>
                       )}
@@ -1389,9 +1617,12 @@ export default function App() {
                           const isLowerPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] < PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
                           const isCheckoutLoading = checkoutTargetId === `plan:${plan.id}`;
                           const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
+                          const isScheduledPlanChangeLoading = checkoutTargetId === `schedule:${plan.id}`;
+                          const isScheduledPlan = scheduledPlanId === plan.id;
                           const isDisabled =
                             isFreePlan ||
                             isCurrentDisplayedPlan ||
+                            isScheduledPlan ||
                             checkoutTargetId !== null;
 
                           return (
@@ -1433,13 +1664,13 @@ export default function App() {
                                   : isEffectivelySubscribed && isHigherPlan
                                     ? () => handleChangePlan(plan.id)
                                     : isEffectivelySubscribed && isLowerPlan
-                                      ? handleManageSubscription
+                                      ? () => handleSchedulePlanChange(plan.id)
                                       : !isFreePlan && !isEffectivelySubscribed
                                     ? () => handleCheckout({ planId: plan.id })
                                     : undefined
                               }
                               disabled={isDisabled}
-                              aria-busy={isCheckoutLoading || isPlanChangeLoading}
+                              aria-busy={isCheckoutLoading || isPlanChangeLoading || isScheduledPlanChangeLoading}
                               className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-colors ${
                                 isCurrentDisplayedPlan
                                   ? "bg-white/8 text-white/70 cursor-default"
@@ -1452,7 +1683,7 @@ export default function App() {
                                       : "bg-white/10 text-white hover:bg-white/15"
                               }`}
                             >
-                              {(isCheckoutLoading || isPlanChangeLoading) && (
+                              {(isCheckoutLoading || isPlanChangeLoading || isScheduledPlanChangeLoading) && (
                                 <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1467,13 +1698,31 @@ export default function App() {
                                       ? "Redirection..."
                                       : "Passer à ce plan"
                                     : isEffectivelySubscribed && isLowerPlan
-                                      ? "Gérer via Stripe"
+                                      ? isScheduledPlan
+                                        ? scheduledPlanEffectiveLabel
+                                          ? `Prévu le ${scheduledPlanEffectiveLabel}`
+                                          : "Déjà planifié"
+                                        : isScheduledPlanChangeLoading
+                                          ? "Planification..."
+                                          : managedPeriodEndLabel
+                                            ? `Passer le ${managedPeriodEndLabel}`
+                                            : "Planifier ce plan"
                                   : isEffectivelySubscribed
                                     ? "Indisponible"
                                     : isCheckoutLoading
                                       ? "Redirection..."
                                       : "S'abonner"}
                             </motion.button>
+                            {isEffectivelySubscribed && isLowerPlan && managedPeriodEndLabel && !isScheduledPlan && (
+                              <p className="mt-3 text-xs leading-5 text-slate-500">
+                                Vous gardez {activePlanLabel} jusqu&apos;au {managedPeriodEndLabel}, puis Stripe basculera sur {plan.name}.
+                              </p>
+                            )}
+                            {isScheduledPlan && scheduledPlanEffectiveLabel && (
+                              <p className="mt-3 text-xs leading-5 text-cyan-100/80">
+                                Le passage vers {plan.name} est déjà planifié pour le {scheduledPlanEffectiveLabel}.
+                              </p>
+                            )}
                             </motion.div>
                           );
                         })}
