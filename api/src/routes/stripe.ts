@@ -19,8 +19,8 @@ import {
 } from "../lib/plans";
 
 const router = Router();
-let managedPortalConfigurationId: string | null = null;
-let managedPortalConfigurationSignature: string | null = null;
+let upgradePortalConfigurationId: string | null = null;
+let upgradePortalConfigurationSignature: string | null = null;
 
 function getClientUrl() {
   return process.env.CLIENT_URL || "http://localhost:5173";
@@ -57,13 +57,6 @@ function getStripePriceId(
 ) {
   if (!price) return null;
   return typeof price === "string" ? price : price.id;
-}
-
-function getStripeProductId(
-  product: string | Stripe.Product | Stripe.DeletedProduct | null | undefined
-) {
-  if (!product) return null;
-  return typeof product === "string" ? product : product.id;
 }
 
 function getSubscriptionPriceId(subscription: Stripe.Subscription) {
@@ -408,7 +401,7 @@ function getScheduledPlanChange(schedule: Stripe.SubscriptionSchedule, currentPl
   };
 }
 
-async function getOrCreateManagedPortalConfiguration() {
+async function getOrCreateUpgradePortalConfiguration() {
   const stripe = getStripe();
   const priceIds = PAID_PLAN_KEYS.map((planKey) => PLANS[planKey].stripePriceId).filter(
     (value): value is string => Boolean(value)
@@ -420,10 +413,10 @@ async function getOrCreateManagedPortalConfiguration() {
 
   const priceSignature = [...priceIds].sort().join(",");
   if (
-    managedPortalConfigurationId &&
-    managedPortalConfigurationSignature === priceSignature
+    upgradePortalConfigurationId &&
+    upgradePortalConfigurationSignature === priceSignature
   ) {
-    return managedPortalConfigurationId;
+    return upgradePortalConfigurationId;
   }
 
   const existingConfigurations = await stripe.billingPortal.configurations.list({
@@ -434,13 +427,13 @@ async function getOrCreateManagedPortalConfiguration() {
     (configuration) =>
       configuration.active &&
       configuration.metadata?.managedBy === "vocal2cal" &&
-      configuration.metadata?.configurationType === "subscription-management" &&
+      configuration.metadata?.configurationType === "subscription-upgrade" &&
       configuration.metadata?.priceSignature === priceSignature
   );
 
   if (reusableConfiguration) {
-    managedPortalConfigurationId = reusableConfiguration.id;
-    managedPortalConfigurationSignature = priceSignature;
+    upgradePortalConfigurationId = reusableConfiguration.id;
+    upgradePortalConfigurationSignature = priceSignature;
     return reusableConfiguration.id;
   }
 
@@ -457,41 +450,21 @@ async function getOrCreateManagedPortalConfiguration() {
   }
 
   const configuration = await stripe.billingPortal.configurations.create({
-    name: "Vocal2Cal Subscription Management",
+    name: "Vocal2Cal Upgrade Flow",
     default_return_url: `${getClientUrl()}?billing=return`,
     metadata: {
       managedBy: "vocal2cal",
-      configurationType: "subscription-management",
+      configurationType: "subscription-upgrade",
       priceSignature,
     },
     features: {
       invoice_history: { enabled: true },
       payment_method_update: { enabled: true },
-      subscription_cancel: {
-        enabled: true,
-        mode: "at_period_end",
-        cancellation_reason: {
-          enabled: true,
-          options: [
-            "too_expensive",
-            "missing_features",
-            "switched_service",
-            "unused",
-            "customer_service",
-            "too_complex",
-            "low_quality",
-            "other",
-          ],
-        },
-      },
       subscription_update: {
         enabled: true,
         billing_cycle_anchor: "unchanged",
         default_allowed_updates: ["price"],
         proration_behavior: "always_invoice",
-        schedule_at_period_end: {
-          conditions: [{ type: "decreasing_item_amount" }],
-        },
         products: Array.from(products.entries()).map(([product, prices]) => ({
           product,
           prices,
@@ -500,8 +473,8 @@ async function getOrCreateManagedPortalConfiguration() {
     },
   });
 
-  managedPortalConfigurationId = configuration.id;
-  managedPortalConfigurationSignature = priceSignature;
+  upgradePortalConfigurationId = configuration.id;
+  upgradePortalConfigurationSignature = priceSignature;
   return configuration.id;
 }
 
@@ -928,7 +901,7 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/stripe/change-plan — Open a Stripe confirmation flow for an upgrade or scheduled downgrade
+// POST /api/stripe/change-plan — Open a Stripe confirmation flow for an upgrade
 router.post("/change-plan", requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
   const { targetPlan } = req.body as { targetPlan?: string };
@@ -967,6 +940,11 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
+    if (!isUpgradePlan(user.plan, targetPlan)) {
+      res.status(400).json({ error: "Les changements vers un plan inférieur se planifient depuis l'application" });
+      return;
+    }
+
     const targetPriceId = PLANS[targetPlan].stripePriceId;
     if (!targetPriceId) {
       res.status(500).json({ error: "Prix Stripe manquant pour ce plan" });
@@ -987,27 +965,13 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
     }
 
     const stripe = getStripe();
-    const targetPrice = await stripe.prices.retrieve(targetPriceId);
-    const targetProductId = getStripeProductId(targetPrice.product);
-    const currentPriceId = getStripePriceId(currentItem.price);
-    const currentPrice = currentPriceId ? await stripe.prices.retrieve(currentPriceId) : null;
-    const currentProductId = currentPrice ? getStripeProductId(currentPrice.product) : null;
-    const isUpgrade = isUpgradePlan(user.plan, targetPlan);
-
-    if (!isUpgrade && (!currentProductId || !targetProductId || currentProductId !== targetProductId)) {
-      res.status(409).json({
-        error: "Stripe ne peut planifier un downgrade hébergé qu'entre des prix du même produit. Regroupez Starter, Pro et Business dans un seul produit Stripe.",
-      });
-      return;
-    }
-
     const customerId = getStripeCustomerId(currentSubscription.customer) || user.stripeCustomerId;
     if (!customerId) {
       res.status(404).json({ error: "Aucun compte Stripe lié" });
       return;
     }
 
-    const portalConfigurationId = await getOrCreateManagedPortalConfiguration();
+    const portalConfigurationId = await getOrCreateUpgradePortalConfiguration();
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
       configuration: portalConfigurationId,
@@ -1017,7 +981,7 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
         after_completion: {
           type: "redirect",
           redirect: {
-            return_url: `${getClientUrl()}?billing=${isUpgrade ? "updated" : "scheduled"}&plan=${targetPlan}`,
+            return_url: `${getClientUrl()}?billing=updated&plan=${targetPlan}`,
           },
         },
         subscription_update_confirm: {
@@ -1264,7 +1228,7 @@ router.post("/clear-scheduled-plan-change", requireAuth, async (req: Request, re
   }
 });
 
-// POST /api/stripe/cancel-subscription — Open a Stripe-hosted cancellation confirmation
+// POST /api/stripe/cancel-subscription — Schedule cancellation at period end
 router.post("/cancel-subscription", requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
 
@@ -1291,33 +1255,28 @@ router.post("/cancel-subscription", requireAuth, async (req: Request, res: Respo
       return;
     }
 
-    const stripe = getStripe();
-    const customerId = getStripeCustomerId(currentSubscription.customer) || user.stripeCustomerId;
-    if (!customerId) {
-      res.status(404).json({ error: "Aucun compte Stripe lié" });
-      return;
-    }
+    await releaseManagedScheduleIfAny(currentSubscription);
 
-    const portalConfigurationId = await getOrCreateManagedPortalConfiguration();
-    const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      configuration: portalConfigurationId,
-      return_url: `${getClientUrl()}?billing=return`,
-      flow_data: {
-        type: "subscription_cancel",
-        after_completion: {
-          type: "redirect",
-          redirect: {
-            return_url: `${getClientUrl()}?billing=canceled`,
-          },
-        },
-        subscription_cancel: {
-          subscription: currentSubscription.id,
-        },
-      },
+    const stripe = getStripe();
+    const updatedSubscription = await stripe.subscriptions.update(currentSubscription.id, {
+      cancel_at_period_end: true,
     });
 
-    res.json({ url: session.url });
+    await syncSubscriptionState({
+      userId: user.id,
+      subscription: updatedSubscription,
+      customerId: getStripeCustomerId(updatedSubscription.customer),
+      fallbackPlan: user.plan,
+    });
+
+    const endDate = getSubscriptionCurrentPeriodEnd(updatedSubscription)?.toISOString() ?? null;
+    res.json({
+      success: true,
+      currentPeriodEnd: endDate,
+      message: endDate
+        ? `Votre abonnement restera actif jusqu'au ${new Date(endDate).toLocaleDateString("fr-FR")}, puis il s'arrêtera automatiquement.`
+        : "Votre résiliation a bien été programmée en fin de période.",
+    });
   } catch (error) {
     console.error("Erreur résiliation abonnement Stripe:", error);
     const message = error instanceof Error ? error.message : "Impossible de programmer la résiliation";
@@ -1396,10 +1355,8 @@ router.post("/portal", requireAuth, async (req: Request, res: Response) => {
     }
 
     const stripe = getStripe();
-    const portalConfigurationId = await getOrCreateManagedPortalConfiguration();
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      configuration: portalConfigurationId,
       return_url: `${getClientUrl()}?billing=return`,
     });
 
