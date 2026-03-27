@@ -204,14 +204,6 @@ function getPlanLabel(planId: string | null) {
   return PLAN_LABELS[planId as keyof typeof PLAN_LABELS] || planId;
 }
 
-function getPlanDisplay(planId: string | null) {
-  if (!planId) {
-    return null;
-  }
-
-  return PRICING_PLANS.find((plan) => plan.id === planId) ?? null;
-}
-
 function useRotatingTypewriter(phrases: string[], typeSpeed = 70, eraseSpeed = 40, startDelay = 600, holdDelay = 2200) {
   const [displayed, setDisplayed] = useState("");
   const [isTyping, setIsTyping] = useState(true);
@@ -276,7 +268,7 @@ export default function App() {
   const [accountUsage, setAccountUsage] = useState<UsageData | null>(null);
   const [subscriptionManagement, setSubscriptionManagement] = useState<SubscriptionManagementData | null>(null);
   const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
-  const [pendingPlanSelection, setPendingPlanSelection] = useState<string | null>(null);
+  const [cancelConfirmationOpen, setCancelConfirmationOpen] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingSuccess, setBillingSuccess] = useState<string | null>(null);
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
@@ -300,7 +292,6 @@ export default function App() {
   const scheduledPlanLabel = getPlanLabel(scheduledPlanId);
   const scheduledPlanEffectiveDate = subscriptionManagement?.scheduledPlanEffectiveDate ?? managedPeriodEnd;
   const scheduledPlanEffectiveLabel = formatFrenchDate(scheduledPlanEffectiveDate ?? null);
-  const pendingPlanDisplay = getPlanDisplay(pendingPlanSelection);
   const cancelAtPeriodEnd = subscriptionManagement?.cancelAtPeriodEnd ?? false;
   const hasManagedSubscription = subscriptionManagement?.hasManagedSubscription ?? false;
   const creditAccentClass =
@@ -342,7 +333,6 @@ export default function App() {
           ? PLAN_LABELS[purchasedPlan as keyof typeof PLAN_LABELS]
           : "votre abonnement";
         setBillingSuccess(`${planName} activé. Les crédits du cycle sont en cours de synchronisation.`);
-        setPendingPlanSelection(null);
         setActiveView("settings");
         scheduleUsageRefresh();
       } else if (paymentType === "topup") {
@@ -366,11 +356,27 @@ export default function App() {
         ? PLAN_LABELS[upgradedPlan as keyof typeof PLAN_LABELS]
         : "votre nouveau plan";
       setBillingSuccess(`${planName} activé. Stripe a confirmé le prorata du mois en cours.`);
-      setPendingPlanSelection(null);
+      setCancelConfirmationOpen(false);
       setActiveView("settings");
       scheduleUsageRefresh();
       params.delete("billing");
       params.delete("plan");
+    } else if (billingState === "scheduled") {
+      const planName = upgradedPlan && upgradedPlan in PLAN_LABELS
+        ? PLAN_LABELS[upgradedPlan as keyof typeof PLAN_LABELS]
+        : "votre prochain plan";
+      setBillingSuccess(`${planName} est maintenant planifié pour la prochaine échéance Stripe.`);
+      setCancelConfirmationOpen(false);
+      setActiveView("settings");
+      scheduleUsageRefresh();
+      params.delete("billing");
+      params.delete("plan");
+    } else if (billingState === "canceled") {
+      setBillingSuccess("La résiliation est programmée. Votre abonnement reste actif jusqu'à la fin du cycle en cours.");
+      setCancelConfirmationOpen(false);
+      setActiveView("settings");
+      scheduleUsageRefresh();
+      params.delete("billing");
     }
 
     const nextSearch = params.toString();
@@ -621,47 +627,6 @@ export default function App() {
     }
   };
 
-  const handlePrepareScheduledPlanChange = (targetPlanId: string) => {
-    setBillingError(null);
-    setBillingSuccess(null);
-    setPendingPlanSelection(targetPlanId);
-    setActiveView("settings");
-  };
-
-  const handleSchedulePlanChange = async (targetPlanId: string) => {
-    if (checkoutTargetId) {
-      return;
-    }
-
-    setBillingError(null);
-    setBillingSuccess(null);
-    setCheckoutTargetId(`schedule:${targetPlanId}`);
-
-    try {
-      const res = await fetch("/api/stripe/schedule-plan-change", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ targetPlan: targetPlanId }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setBillingError(data.error || "Impossible de planifier ce changement");
-        return;
-      }
-
-      setBillingSuccess(data.message || "Changement de plan programmé.");
-      setPendingPlanSelection(null);
-      setUsageRefresh((value) => value + 1);
-      setActiveView("settings");
-    } catch {
-      setBillingError("Impossible de planifier ce changement");
-    } finally {
-      setCheckoutTargetId(null);
-    }
-  };
-
   const handleClearScheduledPlanChange = async () => {
     if (checkoutTargetId) {
       return;
@@ -684,7 +649,6 @@ export default function App() {
       }
 
       setBillingSuccess(data.message || "Changement planifié annulé.");
-      setPendingPlanSelection(null);
       setUsageRefresh((value) => value + 1);
       setActiveView("settings");
     } catch {
@@ -701,7 +665,7 @@ export default function App() {
 
     setBillingError(null);
     setBillingSuccess(null);
-    setPendingPlanSelection(null);
+    setCancelConfirmationOpen(false);
     setCheckoutTargetId("cancel-subscription");
 
     try {
@@ -711,16 +675,17 @@ export default function App() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setBillingError(data.error || "Impossible de programmer la résiliation");
+      if (data.url) {
+        window.location.href = data.url;
         return;
       }
 
-      setBillingSuccess(data.message || "Résiliation programmée.");
-      setUsageRefresh((value) => value + 1);
-      setActiveView("settings");
+      if (!res.ok) {
+        setBillingError(data.error || "Impossible d'ouvrir la confirmation Stripe");
+        return;
+      }
     } catch {
-      setBillingError("Impossible de programmer la résiliation");
+      setBillingError("Impossible d'ouvrir la confirmation Stripe");
     } finally {
       setCheckoutTargetId(null);
     }
@@ -733,7 +698,7 @@ export default function App() {
 
     setBillingError(null);
     setBillingSuccess(null);
-    setPendingPlanSelection(null);
+    setCancelConfirmationOpen(false);
     setCheckoutTargetId("resume-subscription");
 
     try {
@@ -1589,7 +1554,6 @@ export default function App() {
                           const isLowerPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] < PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
                           const isCheckoutLoading = checkoutTargetId === `plan:${plan.id}`;
                           const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
-                          const isScheduledPlanChangeLoading = checkoutTargetId === `schedule:${plan.id}`;
                           const isScheduledPlan = scheduledPlanId === plan.id;
                           const isDisabled =
                             isFreePlan ||
@@ -1636,13 +1600,13 @@ export default function App() {
                                   : isEffectivelySubscribed && isHigherPlan
                                     ? () => handleChangePlan(plan.id)
                                     : isEffectivelySubscribed && isLowerPlan
-                                      ? () => handlePrepareScheduledPlanChange(plan.id)
+                                      ? () => handleChangePlan(plan.id)
                                       : !isFreePlan && !isEffectivelySubscribed
                                     ? () => handleCheckout({ planId: plan.id })
                                     : undefined
                               }
                               disabled={isDisabled}
-                              aria-busy={isCheckoutLoading || isPlanChangeLoading || isScheduledPlanChangeLoading}
+                              aria-busy={isCheckoutLoading || isPlanChangeLoading}
                               className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-colors ${
                                 isCurrentDisplayedPlan
                                   ? "bg-white/8 text-white/70 cursor-default"
@@ -1655,7 +1619,7 @@ export default function App() {
                                       : "bg-white/10 text-white hover:bg-white/15"
                               }`}
                             >
-                              {(isCheckoutLoading || isPlanChangeLoading || isScheduledPlanChangeLoading) && (
+                              {(isCheckoutLoading || isPlanChangeLoading) && (
                                 <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1669,9 +1633,7 @@ export default function App() {
                                     ? "Déjà planifié"
                                     : isPlanChangeLoading || isCheckoutLoading
                                       ? "Redirection..."
-                                      : isScheduledPlanChangeLoading
-                                        ? "Planification..."
-                                        : "Passer à ce plan"}
+                                      : "Passer à ce plan"}
                             </motion.button>
                             </motion.div>
                           );
@@ -1752,11 +1714,11 @@ export default function App() {
                               </p>
                             ) : cancelAtPeriodEnd && managedPeriodEndLabel ? (
                               <p className="mt-2 max-w-2xl text-sm leading-6 text-rose-100/90">
-                                La r&eacute;siliation est programm&eacute;e. Vous conservez les avantages {activePlanLabel} jusqu&apos;au {managedPeriodEndLabel}, puis votre abonnement s&apos;arr&ecirc;tera.
+                                La r&eacute;siliation est programm&eacute;e. Vous conservez les avantages {activePlanLabel} jusqu&apos;au {managedPeriodEndLabel}, puis votre abonnement s&apos;arr&ecirc;tera. Vous pouvez encore revenir en arri&egrave;re avant cette date.
                               </p>
                             ) : scheduledPlanLabel && scheduledPlanEffectiveLabel ? (
                               <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
-                                Votre abonnement actuel reste actif jusqu&apos;au {scheduledPlanEffectiveLabel}. &Agrave; cette date, Stripe basculera automatiquement sur {scheduledPlanLabel} avec ses cr&eacute;dits et son tarif.
+                                Votre abonnement actuel reste actif jusqu&apos;au {scheduledPlanEffectiveLabel}. &Agrave; cette date, Stripe basculera automatiquement sur {scheduledPlanLabel} avec ses cr&eacute;dits et son tarif. Vous pouvez encore annuler ce changement avant qu&apos;il prenne effet.
                               </p>
                             ) : managedPeriodEndLabel ? (
                               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
@@ -1802,7 +1764,7 @@ export default function App() {
                             ) : (
                               <motion.button
                                 type="button"
-                                onClick={handleCancelSubscription}
+                                onClick={() => setCancelConfirmationOpen(true)}
                                 whileHover={checkoutTargetId ? undefined : { y: -2 }}
                                 whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
                                 disabled={checkoutTargetId !== null || !hasManagedSubscription || !hasPaidPlan}
@@ -1812,7 +1774,7 @@ export default function App() {
                                     : "bg-white text-slate-900 hover:bg-slate-100"
                                 } disabled:bg-white/10 disabled:text-white/60`}
                               >
-                                {checkoutTargetId === "cancel-subscription" ? "Programmation..." : "Programmer la résiliation"}
+                                {checkoutTargetId === "cancel-subscription" ? "Ouverture..." : "Programmer la résiliation"}
                               </motion.button>
                             )}
                             <motion.button
@@ -1841,52 +1803,6 @@ export default function App() {
                           </div>
                         </div>
                       </motion.section>
-
-                      {pendingPlanDisplay && hasPaidPlan && activePlanId !== pendingPlanDisplay.id && (
-                        <motion.section
-                          variants={fadeUp}
-                          initial="hidden"
-                          animate="visible"
-                          transition={{ delay: 0.06 }}
-                          className="glass rounded-[26px] border border-amber-300/15 bg-amber-300/[0.04] p-5 sm:p-6"
-                        >
-                          <p className="text-xs uppercase tracking-[0.22em] text-amber-200">Confirmation</p>
-                          <h3 className="mt-1 text-xl font-semibold text-white">
-                            Passer &agrave; {pendingPlanDisplay.name}
-                          </h3>
-                          {hasManagedSubscription && managedPeriodEndLabel ? (
-                            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                              Vous conservez les avantages <span className="font-medium text-white">{activePlanLabel}</span> jusqu&apos;au {managedPeriodEndLabel}. &Agrave; partir de cette date, Stripe basculera sur <span className="font-medium text-white">{pendingPlanDisplay.name}</span>, avec un nouveau tarif de {pendingPlanDisplay.price}{pendingPlanDisplay.period} et {pendingPlanDisplay.credits.toLowerCase()} par cycle.
-                            </p>
-                          ) : (
-                            <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
-                              L&apos;abonnement Stripe doit encore &ecirc;tre rattach&eacute; proprement avant de confirmer ce changement de plan.
-                            </p>
-                          )}
-                          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                            <motion.button
-                              type="button"
-                              onClick={() => handleSchedulePlanChange(pendingPlanDisplay.id)}
-                              whileHover={checkoutTargetId || !hasManagedSubscription ? undefined : { y: -2 }}
-                              whileTap={checkoutTargetId || !hasManagedSubscription ? undefined : { scale: 0.98 }}
-                              disabled={checkoutTargetId !== null || !hasManagedSubscription}
-                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 disabled:bg-white/10 disabled:text-white/60"
-                            >
-                              {checkoutTargetId === `schedule:${pendingPlanDisplay.id}` ? "Planification..." : "Confirmer ce changement"}
-                            </motion.button>
-                            <motion.button
-                              type="button"
-                              onClick={() => setPendingPlanSelection(null)}
-                              whileHover={checkoutTargetId ? undefined : { y: -2 }}
-                              whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
-                              disabled={checkoutTargetId !== null}
-                              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/[0.06] disabled:bg-white/10 disabled:text-white/60"
-                            >
-                              Annuler
-                            </motion.button>
-                          </div>
-                        </motion.section>
-                      )}
 
                       <div className="grid gap-4 lg:grid-cols-2">
                         <motion.section
@@ -2088,6 +2004,71 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+
+      <AnimatePresence>
+        {cancelConfirmationOpen && hasPaidPlan && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm"
+            onClick={() => checkoutTargetId === null && setCancelConfirmationOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.96 }}
+              transition={{ duration: 0.22, ease: smoothEase }}
+              onClick={(event) => event.stopPropagation()}
+              className="glass-strong w-full max-w-lg rounded-[28px] border border-white/10 p-6 shadow-[0_24px_80px_rgba(6,10,20,0.45)]"
+            >
+              <p className="text-xs uppercase tracking-[0.22em] text-rose-200">Confirmation</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                Programmer la résiliation
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Cette action ouvre ensuite une page Stripe officielle pour confirmer la résiliation à fin de période.
+              </p>
+
+              <div className="mt-5 space-y-3">
+                <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
+                  Votre plan <span className="font-medium text-white">{activePlanLabel}</span> reste actif jusqu&apos;au{" "}
+                  <span className="font-medium text-white">{managedPeriodEndLabel || "prochain renouvellement"}</span>.
+                </div>
+                <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
+                  Aucun nouveau prélèvement ne sera effectué après cette date, sauf si vous réactivez l&apos;abonnement avant l&apos;échéance.
+                </div>
+                <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
+                  Vos éventuels changements de plan différés n&apos;auront plus d&apos;effet si la résiliation Stripe est confirmée.
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <motion.button
+                  type="button"
+                  onClick={handleCancelSubscription}
+                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                  disabled={checkoutTargetId !== null}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 disabled:bg-white/10 disabled:text-white/60"
+                >
+                  {checkoutTargetId === "cancel-subscription" ? "Ouverture..." : "Continuer dans Stripe"}
+                </motion.button>
+                <motion.button
+                  type="button"
+                  onClick={() => setCancelConfirmationOpen(false)}
+                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                  disabled={checkoutTargetId !== null}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/[0.06] disabled:bg-white/10 disabled:text-white/60"
+                >
+                  Garder mon abonnement
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {user && (
         <motion.nav
