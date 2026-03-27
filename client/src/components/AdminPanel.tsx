@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import type { AdminStats, AdminUser } from "@/types";
+import type { AdminOverviewResponse, AdminStats, AdminUser } from "@/types";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 14 },
   visible: { opacity: 1, y: 0 },
 };
+
+const ADMIN_REQUEST_TIMEOUT_MS = 12000;
 
 export function AdminPanel() {
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -14,36 +16,67 @@ export function AdminPanel() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort("timeout"), ADMIN_REQUEST_TIMEOUT_MS);
+    let isMounted = true;
+
     async function load() {
-      setIsLoading(true);
+      if (isMounted) {
+        setIsLoading(true);
+        setError(null);
+      }
+
       try {
-        const [statsRes, usersRes] = await Promise.all([
-          fetch("/api/admin/stats", { credentials: "include" }),
-          fetch("/api/admin/users", { credentials: "include" }),
-        ]);
+        const response = await fetch("/api/admin/overview", {
+          credentials: "include",
+          signal: controller.signal,
+        });
 
-        if (!statsRes.ok) {
-          const body = await statsRes.text();
-          setError(`Stats (${statsRes.status}): ${body}`);
-          return;
-        }
-        if (!usersRes.ok) {
-          const body = await usersRes.text();
-          setError(`Users (${usersRes.status}): ${body}`);
+        if (!response.ok) {
+          const body = await response.text();
+          if (isMounted) {
+            setError(`Admin (${response.status}): ${body}`);
+          }
           return;
         }
 
-        const statsData = await statsRes.json();
-        const usersData = await usersRes.json();
-        setStats(statsData);
-        setUsers(usersData.users);
-      } catch {
+        const data = await response.json() as AdminOverviewResponse;
+        if (isMounted) {
+          setStats(data.stats);
+          setUsers(data.users);
+        }
+      } catch (err) {
+        if (!isMounted) {
+          return;
+        }
+
+        if (controller.signal.aborted) {
+          const reason = typeof err === "string" ? err : controller.signal.reason;
+          const isTimeout = reason === "timeout";
+          setError(
+            isTimeout
+              ? "Le panneau admin a dépassé le délai d'attente. Vérifiez les logs Vercel et DATABASE_URL."
+              : "Le chargement admin a été interrompu."
+          );
+          return;
+        }
+
         setError("Impossible de charger les données admin");
       } finally {
-        setIsLoading(false);
+        window.clearTimeout(timeoutId);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     }
+
     load();
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(timeoutId);
+      controller.abort("unmount");
+    };
   }, []);
 
   if (isLoading) {

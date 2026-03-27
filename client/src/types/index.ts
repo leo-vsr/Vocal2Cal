@@ -92,3 +92,8 @@ export interface AdminUser {
   createdAt: string;
   _count: { voiceActions: number; payments: number };
 }
+
+export interface AdminOverviewResponse {
+  stats: AdminStats;
+  users: AdminUser[];
+}

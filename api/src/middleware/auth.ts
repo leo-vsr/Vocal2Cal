@@ -18,17 +18,22 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     return;
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
 
-  if (!user || user.role !== "ADMIN") {
-    res.status(403).json({ error: "Accès réservé aux administrateurs" });
-    return;
+    if (!user || user.role !== "ADMIN") {
+      res.status(403).json({ error: "Accès réservé aux administrateurs" });
+      return;
+    }
+
+    next();
+  } catch (error) {
+    console.error("[auth] Failed to validate admin access", error);
+    res.status(500).json({ error: "Impossible de vérifier les droits administrateur" });
   }
-
-  next();
 }
 
 export async function requireCredits(req: Request, res: Response, next: NextFunction): Promise<void> {

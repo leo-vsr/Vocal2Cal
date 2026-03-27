@@ -4,9 +4,8 @@ import { prisma } from "../lib/prisma";
 
 const router = Router();
 
-// GET /api/admin/users — List all users with stats
-router.get("/users", requireAdmin, async (_req: Request, res: Response) => {
-  const users = await prisma.user.findMany({
+async function getAdminUsers() {
+  return prisma.user.findMany({
     select: {
       id: true,
       name: true,
@@ -20,12 +19,9 @@ router.get("/users", requireAdmin, async (_req: Request, res: Response) => {
     },
     orderBy: { createdAt: "desc" },
   });
+}
 
-  res.json({ users });
-});
-
-// GET /api/admin/stats — Global platform statistics
-router.get("/stats", requireAdmin, async (_req: Request, res: Response) => {
+async function getAdminStats() {
   const now = new Date();
   const startOfDay = new Date(now);
   startOfDay.setHours(0, 0, 0, 0);
@@ -68,7 +64,7 @@ router.get("/stats", requireAdmin, async (_req: Request, res: Response) => {
   const estimatedTotalApiCost = totalActions * estimatedApiCostPerCall;
   const estimatedMonthApiCost = actionsMonth * estimatedApiCostPerCall;
 
-  res.json({
+  return {
     users: {
       total: totalUsers,
       planDistribution: planDistribution.map((p) => ({
@@ -96,7 +92,44 @@ router.get("/stats", requireAdmin, async (_req: Request, res: Response) => {
       totalCosts: Math.round(estimatedTotalApiCost * 100) / 100,
       netProfit: Math.round(((totalRevenue._sum.amount || 0) / 100 - estimatedTotalApiCost) * 100) / 100,
     },
-  });
+  };
+}
+
+// GET /api/admin/overview — All admin data required by the dashboard
+router.get("/overview", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const [stats, users] = await Promise.all([
+      getAdminStats(),
+      getAdminUsers(),
+    ]);
+
+    res.json({ stats, users });
+  } catch (error) {
+    console.error("[admin] Failed to load overview", error);
+    res.status(500).json({ error: "Impossible de charger les données administrateur" });
+  }
+});
+
+// GET /api/admin/users — List all users with stats
+router.get("/users", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const users = await getAdminUsers();
+    res.json({ users });
+  } catch (error) {
+    console.error("[admin] Failed to load users", error);
+    res.status(500).json({ error: "Impossible de charger les utilisateurs" });
+  }
+});
+
+// GET /api/admin/stats — Global platform statistics
+router.get("/stats", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const stats = await getAdminStats();
+    res.json(stats);
+  } catch (error) {
+    console.error("[admin] Failed to load stats", error);
+    res.status(500).json({ error: "Impossible de charger les statistiques administrateur" });
+  }
 });
 
 // POST /api/admin/grant-credits — Grant credits to a user
@@ -129,7 +162,8 @@ router.post("/grant-credits", requireAdmin, async (req: Request, res: Response) 
     });
 
     res.json({ success: true, newBalance: updatedUser.credits });
-  } catch {
+  } catch (error) {
+    console.error("[admin] Failed to grant credits", error);
     res.status(404).json({ error: "Utilisateur introuvable" });
   }
 });
@@ -149,7 +183,8 @@ router.post("/set-role", requireAdmin, async (req: Request, res: Response) => {
       data: { role: role as "USER" | "ADMIN" },
     });
     res.json({ success: true });
-  } catch {
+  } catch (error) {
+    console.error("[admin] Failed to update role", error);
     res.status(404).json({ error: "Utilisateur introuvable" });
   }
 });
