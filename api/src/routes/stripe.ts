@@ -9,7 +9,9 @@ import {
   type PaidPlanKey,
   type PlanKey,
   type TopUpPackKey,
+  getPlanCreditDelta,
   isPaidPlanKey,
+  isUpgradePlan,
   isSubscriptionActiveStatus,
   isTopUpPackKey,
 } from "../lib/plans";
@@ -243,6 +245,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
     return;
   }
   const planKey = plan as PaidPlanKey;
+  const isPlanChangeInvoice = invoice.billing_reason === "subscription_update";
 
   await prisma.$transaction(async (tx) => {
     const existingPayment = await tx.payment.findUnique({
@@ -251,6 +254,22 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
     });
 
     if (existingPayment) {
+      return;
+    }
+
+    if (isPlanChangeInvoice) {
+      await tx.payment.create({
+        data: {
+          userId,
+          kind: "SUBSCRIPTION",
+          stripeInvoiceId: invoice.id,
+          stripeSubscriptionId: subscription.id,
+          plan: planKey,
+          amount: invoice.amount_paid || invoice.amount_due || 0,
+          creditsGranted: 0,
+          status: "completed",
+        },
+      });
       return;
     }
 
@@ -436,6 +455,124 @@ router.post("/checkout", requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Erreur Stripe checkout:", error);
     res.status(500).json({ error: "Impossible de créer la session de paiement" });
+  }
+});
+
+// POST /api/stripe/change-plan — Upgrade an active subscription
+router.post("/change-plan", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { targetPlan } = req.body as { targetPlan?: string };
+
+  if (!targetPlan || !isPaidPlanKey(targetPlan)) {
+    res.status(400).json({ error: "Plan cible invalide" });
+    return;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        plan: true,
+        credits: true,
+        stripeSubscriptionId: true,
+        subscriptionStatus: true,
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: "Utilisateur introuvable" });
+      return;
+    }
+
+    if (!isPaidPlanKey(user.plan) || !isSubscriptionActiveStatus(user.subscriptionStatus) || !user.stripeSubscriptionId) {
+      res.status(409).json({ error: "Aucun abonnement actif modifiable" });
+      return;
+    }
+
+    if (user.plan === targetPlan) {
+      res.status(400).json({ error: "Vous êtes déjà sur ce plan" });
+      return;
+    }
+
+    if (!isUpgradePlan(user.plan, targetPlan)) {
+      res.status(400).json({ error: "Les changements vers un plan inférieur se gèrent via Stripe" });
+      return;
+    }
+
+    const targetPriceId = PLANS[targetPlan].stripePriceId;
+    if (!targetPriceId) {
+      res.status(500).json({ error: "Prix Stripe manquant pour ce plan" });
+      return;
+    }
+
+    const stripe = getStripe();
+    const currentSubscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+    const currentItem = currentSubscription.items.data[0];
+
+    if (!currentItem) {
+      res.status(404).json({ error: "Aucun item d'abonnement Stripe trouvé" });
+      return;
+    }
+
+    const updatedSubscription = await stripe.subscriptions.update(user.stripeSubscriptionId, {
+      cancel_at_period_end: false,
+      payment_behavior: "error_if_incomplete",
+      proration_behavior: "always_invoice",
+      metadata: {
+        purchaseType: "subscription",
+        userId: user.id,
+        plan: targetPlan,
+        credits: String(PLANS[targetPlan].credits),
+      },
+      items: [
+        {
+          id: currentItem.id,
+          price: targetPriceId,
+        },
+      ],
+    });
+
+    const addedCredits = getPlanCreditDelta(user.plan, targetPlan);
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        plan: targetPlan,
+        credits: { increment: addedCredits },
+        stripeSubscriptionId: updatedSubscription.id,
+        subscriptionStatus: updatedSubscription.status,
+        subscriptionCurrentPeriodEnd: getSubscriptionCurrentPeriodEnd(updatedSubscription),
+      },
+    });
+
+    if (addedCredits > 0) {
+      await prisma.creditTransaction.create({
+        data: {
+          userId: user.id,
+          type: "PURCHASE",
+          amount: addedCredits,
+          balance: updatedUser.credits,
+          description: `Upgrade ${PLANS[user.plan].name} -> ${PLANS[targetPlan].name} — +${addedCredits} crédits`,
+        },
+      });
+    }
+
+    res.json({
+      success: true,
+      plan: targetPlan,
+      credits: updatedUser.credits,
+      addedCredits,
+      message: "Upgrade effectué. Stripe applique automatiquement le prorata du cycle en cours.",
+    });
+  } catch (error) {
+    console.error("Erreur changement de plan Stripe:", error);
+
+    if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+
+    res.status(500).json({ error: "Impossible de changer de plan" });
   }
 });
 
