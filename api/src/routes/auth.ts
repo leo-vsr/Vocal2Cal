@@ -84,23 +84,36 @@ passport.deserializeUser(async (id: string, done) => {
 
 router.get("/google", passport.authenticate("google"));
 
-router.get(
-  "/google/callback",
-  passport.authenticate("google", { failureRedirect: "/" }),
-  (req: Request, res: Response) => {
-    // Store userId in session for our middleware
-    if (req.user) {
-      const userId = (req.user as { id: string }).id;
-      req.session.userId = userId;
-      setAuthCookie(res, userId);
+router.get("/google/callback", (req: Request, res: Response, next) => {
+  passport.authenticate("google", (err: Error | null, user: Express.User | false, info: unknown) => {
+    const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+
+    if (err) {
+      console.error("[oauth] Authentication error:", err.message, err);
+      return res.redirect(clientUrl);
     }
 
-    req.session.save(() => {
-      const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
-      res.redirect(clientUrl);
+    if (!user) {
+      console.error("[oauth] No user returned. Info:", info);
+      return res.redirect(clientUrl);
+    }
+
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        console.error("[oauth] Login error:", loginErr);
+        return res.redirect(clientUrl);
+      }
+
+      const userId = (user as { id: string }).id;
+      req.session.userId = userId;
+      setAuthCookie(res, userId);
+
+      req.session.save(() => {
+        res.redirect(clientUrl);
+      });
     });
-  }
-);
+  })(req, res, next);
+});
 
 router.get("/me", async (req: Request, res: Response) => {
   const userId = getAuthenticatedUserId(req);
