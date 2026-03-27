@@ -93,12 +93,12 @@ const PRICING_PLANS = [
 ] as const;
 
 const TOP_UP_PACKS = [
-  { id: "BOOST_20", name: "Boost 20", price: "3,99€", credits: "20 crédits", desc: "Petit appoint pour finir le mois" },
-  { id: "BOOST_80", name: "Boost 80", price: "11,99€", credits: "80 crédits", desc: "Dépannage confortable, moins rentable qu'un upgrade" },
-  { id: "BOOST_200", name: "Boost 200", price: "24,99€", credits: "200 crédits", desc: "Recharge d'urgence pour gros pic d'activité" },
+  { id: "BOOST_20", name: "Boost 20", price: "1,99€", credits: "20 crédits", desc: "Petit appoint pour terminer le mois sans changer d'offre" },
+  { id: "BOOST_80", name: "Boost 80", price: "6,99€", credits: "80 crédits", desc: "Recharge souple, volontairement moins rentable qu'un abonnement" },
+  { id: "BOOST_200", name: "Boost 200", price: "17,99€", credits: "200 crédits", desc: "Gros appoint ponctuel, utile si vous êtes déjà abonné" },
 ] as const;
 
-type AppView = "home" | "dashboard" | "pricing" | "admin";
+type AppView = "home" | "dashboard" | "pricing" | "settings" | "admin";
 
 const baseViewTabs: Array<{ id: AppView; label: string; icon: string }> = [
   {
@@ -116,6 +116,11 @@ const baseViewTabs: Array<{ id: AppView; label: string; icon: string }> = [
     label: "Tarifs",
     icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
   },
+  {
+    id: "settings",
+    label: "Réglages",
+    icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.573-1.066z M15 12a3 3 0 11-6 0 3 3 0 016 0z",
+  },
 ];
 
 const adminTab: { id: AppView; label: string; icon: string } = {
@@ -129,8 +134,6 @@ const SWIPE_VELOCITY_THRESHOLD = 650;
 const WHEEL_SWIPE_THRESHOLD = 140;
 const WHEEL_RESET_DELAY_MS = 180;
 const SWIPE_COOLDOWN_MS = 420;
-
-type SwipeDirection = "left" | "right";
 
 const pageVariants = {
   hidden: { opacity: 0, scale: 0.95, y: 20 },
@@ -201,6 +204,14 @@ function getPlanLabel(planId: string | null) {
   return PLAN_LABELS[planId as keyof typeof PLAN_LABELS] || planId;
 }
 
+function getPlanDisplay(planId: string | null) {
+  if (!planId) {
+    return null;
+  }
+
+  return PRICING_PLANS.find((plan) => plan.id === planId) ?? null;
+}
+
 function useRotatingTypewriter(phrases: string[], typeSpeed = 70, eraseSpeed = 40, startDelay = 600, holdDelay = 2200) {
   const [displayed, setDisplayed] = useState("");
   const [isTyping, setIsTyping] = useState(true);
@@ -261,10 +272,11 @@ export default function App() {
   const { user, status, signIn, signOut } = useAuth();
   const [usageRefresh, setUsageRefresh] = useState(0);
   const [activeView, setActiveView] = useState<AppView>("home");
-  const [swipeHint, setSwipeHint] = useState<SwipeDirection | null>(null);
+  const [swipeHint, setSwipeHint] = useState<string | null>(null);
   const [accountUsage, setAccountUsage] = useState<UsageData | null>(null);
   const [subscriptionManagement, setSubscriptionManagement] = useState<SubscriptionManagementData | null>(null);
   const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
+  const [pendingPlanSelection, setPendingPlanSelection] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingSuccess, setBillingSuccess] = useState<string | null>(null);
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
@@ -288,6 +300,7 @@ export default function App() {
   const scheduledPlanLabel = getPlanLabel(scheduledPlanId);
   const scheduledPlanEffectiveDate = subscriptionManagement?.scheduledPlanEffectiveDate ?? managedPeriodEnd;
   const scheduledPlanEffectiveLabel = formatFrenchDate(scheduledPlanEffectiveDate ?? null);
+  const pendingPlanDisplay = getPlanDisplay(pendingPlanSelection);
   const cancelAtPeriodEnd = subscriptionManagement?.cancelAtPeriodEnd ?? false;
   const hasManagedSubscription = subscriptionManagement?.hasManagedSubscription ?? false;
   const creditAccentClass =
@@ -305,25 +318,71 @@ export default function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const paymentState = params.get("payment");
+    const paymentType = params.get("type");
+    const purchasedPlan = params.get("plan");
+    const purchasedPack = params.get("pack");
     const billingState = params.get("billing");
     const upgradedPlan = params.get("plan");
+    const refreshTimeouts: number[] = [];
+
+    const scheduleUsageRefresh = () => {
+      setUsageRefresh((value) => value + 1);
+      refreshTimeouts.push(
+        window.setTimeout(() => setUsageRefresh((value) => value + 1), 1500)
+      );
+      refreshTimeouts.push(
+        window.setTimeout(() => setUsageRefresh((value) => value + 1), 4500)
+      );
+    };
+
+    if (paymentState === "success") {
+      if (paymentType === "subscription") {
+        const planName = purchasedPlan && purchasedPlan in PLAN_LABELS
+          ? PLAN_LABELS[purchasedPlan as keyof typeof PLAN_LABELS]
+          : "votre abonnement";
+        setBillingSuccess(`${planName} activé. Les crédits du cycle sont en cours de synchronisation.`);
+        setPendingPlanSelection(null);
+        setActiveView("settings");
+        scheduleUsageRefresh();
+      } else if (paymentType === "topup") {
+        const packName = TOP_UP_PACKS.find((pack) => pack.id === purchasedPack)?.name || "La recharge";
+        setBillingSuccess(`${packName} confirmée. Le solde est en cours de mise à jour.`);
+        setActiveView("settings");
+        scheduleUsageRefresh();
+      }
+
+      params.delete("payment");
+      params.delete("type");
+      params.delete("plan");
+      params.delete("pack");
+    } else if (paymentState === "cancel") {
+      setBillingError("Paiement annulé.");
+      params.delete("payment");
+    }
 
     if (billingState === "updated") {
       const planName = upgradedPlan && upgradedPlan in PLAN_LABELS
         ? PLAN_LABELS[upgradedPlan as keyof typeof PLAN_LABELS]
         : "votre nouveau plan";
       setBillingSuccess(`${planName} activé. Stripe a confirmé le prorata du mois en cours.`);
-      setUsageRefresh((value) => value + 1);
+      setPendingPlanSelection(null);
+      setActiveView("settings");
+      scheduleUsageRefresh();
       params.delete("billing");
       params.delete("plan");
-
-      const nextSearch = params.toString();
-      window.history.replaceState(
-        {},
-        "",
-        `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
-      );
     }
+
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
+    );
+
+    return () => {
+      refreshTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    };
   }, []);
 
   useEffect(() => {
@@ -373,8 +432,8 @@ export default function App() {
     };
   }, []);
 
-  const showSwipeHint = (direction: SwipeDirection) => {
-    setSwipeHint(direction);
+  const showSwipeHint = (label: string) => {
+    setSwipeHint(label);
     if (swipeHintTimeoutRef.current) {
       window.clearTimeout(swipeHintTimeoutRef.current);
     }
@@ -384,7 +443,7 @@ export default function App() {
     }, 900);
   };
 
-  const setViewFromSwipe = (direction: SwipeDirection) => {
+  const setViewFromSwipe = (direction: "left" | "right") => {
     if (swipeLockedRef.current) {
       return;
     }
@@ -396,7 +455,7 @@ export default function App() {
     if (nextIndex < 0 || nextIndex >= viewTabs.length) return;
 
     setActiveView(viewTabs[nextIndex].id);
-    showSwipeHint(direction);
+    showSwipeHint(viewTabs[nextIndex].label);
 
     swipeLockedRef.current = true;
     if (swipeCooldownTimeoutRef.current) {
@@ -562,6 +621,13 @@ export default function App() {
     }
   };
 
+  const handlePrepareScheduledPlanChange = (targetPlanId: string) => {
+    setBillingError(null);
+    setBillingSuccess(null);
+    setPendingPlanSelection(targetPlanId);
+    setActiveView("settings");
+  };
+
   const handleSchedulePlanChange = async (targetPlanId: string) => {
     if (checkoutTargetId) {
       return;
@@ -586,7 +652,9 @@ export default function App() {
       }
 
       setBillingSuccess(data.message || "Changement de plan programmé.");
+      setPendingPlanSelection(null);
       setUsageRefresh((value) => value + 1);
+      setActiveView("settings");
     } catch {
       setBillingError("Impossible de planifier ce changement");
     } finally {
@@ -616,7 +684,9 @@ export default function App() {
       }
 
       setBillingSuccess(data.message || "Changement planifié annulé.");
+      setPendingPlanSelection(null);
       setUsageRefresh((value) => value + 1);
+      setActiveView("settings");
     } catch {
       setBillingError("Impossible d'annuler le changement planifié");
     } finally {
@@ -631,6 +701,7 @@ export default function App() {
 
     setBillingError(null);
     setBillingSuccess(null);
+    setPendingPlanSelection(null);
     setCheckoutTargetId("cancel-subscription");
 
     try {
@@ -647,6 +718,7 @@ export default function App() {
 
       setBillingSuccess(data.message || "Résiliation programmée.");
       setUsageRefresh((value) => value + 1);
+      setActiveView("settings");
     } catch {
       setBillingError("Impossible de programmer la résiliation");
     } finally {
@@ -661,6 +733,7 @@ export default function App() {
 
     setBillingError(null);
     setBillingSuccess(null);
+    setPendingPlanSelection(null);
     setCheckoutTargetId("resume-subscription");
 
     try {
@@ -677,6 +750,7 @@ export default function App() {
 
       setBillingSuccess(data.message || "Abonnement réactivé.");
       setUsageRefresh((value) => value + 1);
+      setActiveView("settings");
     } catch {
       setBillingError("Impossible de reprendre l'abonnement");
     } finally {
@@ -719,7 +793,7 @@ export default function App() {
             >
               <button
                 type="button"
-                onClick={() => setActiveView("pricing")}
+                onClick={() => setActiveView("settings")}
                 className="inline-flex items-center gap-2 rounded-lg bg-white/[0.04] px-2.5 py-1 transition-colors hover:bg-white/[0.07] sm:hidden"
               >
                 <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-amber-200/70">
@@ -730,7 +804,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setActiveView("pricing")}
+                onClick={() => setActiveView("settings")}
                 className="hidden items-center gap-3.5 rounded-xl bg-white/[0.04] px-4 py-1.5 transition-colors hover:bg-white/[0.07] sm:flex"
               >
                 <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-200/70">
@@ -1229,10 +1303,10 @@ export default function App() {
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={1.8}
-                          d={swipeHint === "right" ? "M13 5l7 7-7 7M5 12h15" : "M11 19l-7-7 7-7m8 7H4"}
+                          d="M13 5l7 7-7 7M5 12h15"
                         />
                       </svg>
-                      {swipeHint === "right" ? "Dashboard" : "Accueil"}
+                      {swipeHint}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1490,117 +1564,15 @@ export default function App() {
                       >
                         <p className="text-xs uppercase tracking-[0.22em] text-fuchsia-300">Tarifs</p>
                         <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-                          Pilotez votre abonnement
+                          Comparez les offres
                         </h2>
                         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
                           1 cr&eacute;dit = 1 demande compl&egrave;te. Les abonnements mensuels assurent le meilleur prix au cr&eacute;dit, et les recharges restent volontairement moins avantageuses.
                         </p>
                         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-                          En cas de montée de plan, Stripe affiche le prorata de ce mois au moment de la confirmation, puis les prochains mois repartent au tarif habituel.
+                          Les changements de plan et la gestion de facturation se confirment ensuite dans l&apos;espace <span className="text-slate-300">R&eacute;glages</span> ou directement dans Stripe selon le cas.
                         </p>
                       </motion.section>
-
-                      {hasPaidPlan && (
-                        <motion.section
-                          variants={fadeUp}
-                          initial="hidden"
-                          animate="visible"
-                          transition={{ delay: 0.04 }}
-                          className="glass rounded-[26px] border border-cyan-400/15 bg-cyan-400/[0.04] p-5 sm:p-6"
-                        >
-                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                              <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Abonnement</p>
-                              <h3 className="mt-1 text-xl font-semibold text-white">
-                                {activePlanLabel} en cours
-                              </h3>
-                              {!hasManagedSubscription ? (
-                                <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
-                                  Le plan local est bien connu, mais l&apos;abonnement Stripe n&apos;a pas encore pu &ecirc;tre rattach&eacute; automatiquement. Si vous venez d&apos;activer un abonnement, attendez le webhook Stripe ou rechargez la page.
-                                </p>
-                              ) : cancelAtPeriodEnd && managedPeriodEndLabel ? (
-                                <p className="mt-2 max-w-2xl text-sm leading-6 text-rose-100/90">
-                                  La r&eacute;siliation est programm&eacute;e. Vous gardez tous les avantages {activePlanLabel} jusqu&apos;au {managedPeriodEndLabel}, puis l&apos;abonnement s&apos;arr&ecirc;tera.
-                                </p>
-                              ) : scheduledPlanLabel && scheduledPlanEffectiveLabel ? (
-                                <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
-                                  Vous restez sur {activePlanLabel} jusqu&apos;au {scheduledPlanEffectiveLabel}, puis Stripe basculera automatiquement sur {scheduledPlanLabel} et les avantages associ&eacute;s.
-                                </p>
-                              ) : managedPeriodEndLabel ? (
-                                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                                  Prochain renouvellement estim&eacute; le {managedPeriodEndLabel}. Votre solde sera recharg&eacute; automatiquement &agrave; chaque cycle mensuel.
-                                </p>
-                              ) : (
-                                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                                  Votre abonnement reste actif et vos cr&eacute;dits se rechargent automatiquement &agrave; chaque cycle mensuel.
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[220px]">
-                              {scheduledPlanLabel ? (
-                                <motion.button
-                                  type="button"
-                                  onClick={handleClearScheduledPlanChange}
-                                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
-                                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
-                                  disabled={checkoutTargetId !== null}
-                                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
-                                    checkoutTargetId === "clear-scheduled-plan"
-                                      ? "bg-white/10 text-white/60"
-                                      : "bg-white text-slate-900 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  {checkoutTargetId === "clear-scheduled-plan" ? "Annulation..." : "Annuler le changement planifié"}
-                                </motion.button>
-                              ) : cancelAtPeriodEnd ? (
-                                <motion.button
-                                  type="button"
-                                  onClick={handleResumeSubscription}
-                                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
-                                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
-                                  disabled={checkoutTargetId !== null}
-                                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
-                                    checkoutTargetId === "resume-subscription"
-                                      ? "bg-white/10 text-white/60"
-                                      : "bg-white text-slate-900 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  {checkoutTargetId === "resume-subscription" ? "Réactivation..." : "Réactiver l'abonnement"}
-                                </motion.button>
-                              ) : (
-                                <motion.button
-                                  type="button"
-                                  onClick={handleCancelSubscription}
-                                  whileHover={checkoutTargetId ? undefined : { y: -2 }}
-                                  whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
-                                  disabled={checkoutTargetId !== null || !hasManagedSubscription}
-                                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
-                                    checkoutTargetId === "cancel-subscription"
-                                      ? "bg-white/10 text-white/60"
-                                      : "bg-white text-slate-900 hover:bg-slate-100"
-                                  } disabled:bg-white/10 disabled:text-white/60`}
-                                >
-                                  {checkoutTargetId === "cancel-subscription" ? "Programmation..." : "Programmer la résiliation"}
-                                </motion.button>
-                              )}
-                              <motion.button
-                                type="button"
-                                onClick={handleManageSubscription}
-                                whileHover={checkoutTargetId ? undefined : { y: -2 }}
-                                whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
-                                disabled={checkoutTargetId !== null || !hasManagedSubscription}
-                                className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
-                                  checkoutTargetId === "portal"
-                                    ? "bg-white/10 text-white/60"
-                                    : "bg-white/10 text-white hover:bg-white/15"
-                                } disabled:bg-white/10 disabled:text-white/60`}
-                              >
-                                {checkoutTargetId === "portal" ? "Ouverture..." : "Paiement et factures"}
-                              </motion.button>
-                            </div>
-                          </div>
-                        </motion.section>
-                      )}
 
                       <motion.div
                         variants={fadeUp}
@@ -1664,7 +1636,7 @@ export default function App() {
                                   : isEffectivelySubscribed && isHigherPlan
                                     ? () => handleChangePlan(plan.id)
                                     : isEffectivelySubscribed && isLowerPlan
-                                      ? () => handleSchedulePlanChange(plan.id)
+                                      ? () => handlePrepareScheduledPlanChange(plan.id)
                                       : !isFreePlan && !isEffectivelySubscribed
                                     ? () => handleCheckout({ planId: plan.id })
                                     : undefined
@@ -1692,48 +1664,297 @@ export default function App() {
                               {isFreePlan
                                 ? "Inclus"
                                 : isCurrentDisplayedPlan
-                                ? "Plan actuel"
-                                  : isEffectivelySubscribed && isHigherPlan
-                                    ? isPlanChangeLoading
+                                  ? "Plan actuel"
+                                  : isScheduledPlan
+                                    ? "Déjà planifié"
+                                    : isPlanChangeLoading || isCheckoutLoading
                                       ? "Redirection..."
-                                      : "Passer à ce plan"
-                                    : isEffectivelySubscribed && isLowerPlan
-                                      ? isScheduledPlan
-                                        ? scheduledPlanEffectiveLabel
-                                          ? `Prévu le ${scheduledPlanEffectiveLabel}`
-                                          : "Déjà planifié"
-                                        : isScheduledPlanChangeLoading
-                                          ? "Planification..."
-                                          : managedPeriodEndLabel
-                                            ? `Passer le ${managedPeriodEndLabel}`
-                                            : "Planifier ce plan"
-                                  : isEffectivelySubscribed
-                                    ? "Indisponible"
-                                    : isCheckoutLoading
-                                      ? "Redirection..."
-                                      : "S'abonner"}
+                                      : isScheduledPlanChangeLoading
+                                        ? "Planification..."
+                                        : "Passer à ce plan"}
                             </motion.button>
-                            {isEffectivelySubscribed && isLowerPlan && managedPeriodEndLabel && !isScheduledPlan && (
-                              <p className="mt-3 text-xs leading-5 text-slate-500">
-                                Vous gardez {activePlanLabel} jusqu&apos;au {managedPeriodEndLabel}, puis Stripe basculera sur {plan.name}.
-                              </p>
-                            )}
-                            {isScheduledPlan && scheduledPlanEffectiveLabel && (
-                              <p className="mt-3 text-xs leading-5 text-cyan-100/80">
-                                Le passage vers {plan.name} est déjà planifié pour le {scheduledPlanEffectiveLabel}.
-                              </p>
-                            )}
                             </motion.div>
                           );
                         })}
                       </motion.div>
+
+                      <motion.div
+                        variants={fadeUp}
+                        initial="hidden"
+                        animate="visible"
+                        transition={{ delay: 0.2 }}
+                        className="glass rounded-2xl border border-white/6 p-5 text-center"
+                      >
+                        <p className="text-sm text-slate-400">
+                          Paiement s&eacute;curis&eacute; par <span className="font-medium text-white">Stripe</span>. Les abonnements alimentent automatiquement le solde &agrave; chaque cycle et les recharges restent moins rentables qu&apos;une mont&eacute;e de plan.
+                        </p>
+                        {checkoutTargetId && (
+                          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-cyan-200">
+                            Ouverture du checkout Stripe en cours...
+                          </p>
+                        )}
+                        {billingSuccess && (
+                          <p className="mt-3 text-sm text-emerald-300">
+                            {billingSuccess}
+                          </p>
+                        )}
+                        {billingError && (
+                          <p className="mt-3 text-sm text-amber-200">
+                            {billingError}
+                          </p>
+                        )}
+                      </motion.div>
+                    </motion.div>
+                  ) : activeView === "settings" ? (
+                    <motion.div
+                      key="settings-view"
+                      variants={panelVariants}
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
+                      className="w-full space-y-5"
+                    >
+                      <motion.section
+                        variants={fadeUp}
+                        initial="hidden"
+                        animate="visible"
+                        className="glass-strong rounded-[30px] border border-white/8 p-5 sm:p-6"
+                      >
+                        <p className="text-xs uppercase tracking-[0.22em] text-cyan-300">Réglages</p>
+                        <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                          Paramètres du compte
+                        </h2>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                          Retrouvez ici la gestion de votre abonnement, vos informations de compte et les actions de session utiles.
+                        </p>
+                      </motion.section>
+
+                      <motion.section
+                        variants={fadeUp}
+                        initial="hidden"
+                        animate="visible"
+                        transition={{ delay: 0.04 }}
+                        className="glass rounded-[26px] border border-cyan-400/15 bg-cyan-400/[0.04] p-5 sm:p-6"
+                      >
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Gérer votre abonnement</p>
+                            <h3 className="mt-1 text-xl font-semibold text-white">
+                              {activePlanLabel}
+                            </h3>
+                            {!hasPaidPlan ? (
+                              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                                Vous êtes sur l&apos;offre Découverte. Rendez-vous dans l&apos;onglet Tarifs pour choisir un abonnement mensuel.
+                              </p>
+                            ) : !hasManagedSubscription ? (
+                              <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
+                                Le plan local est bien connu, mais l&apos;abonnement Stripe n&apos;a pas encore pu &ecirc;tre rattach&eacute; automatiquement. Si le paiement est tr&egrave;s r&eacute;cent, rechargez la page. Sinon, le rattachement a probablement &eacute;t&eacute fait sur un autre client Stripe li&eacute; &agrave; votre email et sera recherch&eacute; automatiquement apr&egrave;s red&eacute;ploiement.
+                              </p>
+                            ) : cancelAtPeriodEnd && managedPeriodEndLabel ? (
+                              <p className="mt-2 max-w-2xl text-sm leading-6 text-rose-100/90">
+                                La r&eacute;siliation est programm&eacute;e. Vous conservez les avantages {activePlanLabel} jusqu&apos;au {managedPeriodEndLabel}, puis votre abonnement s&apos;arr&ecirc;tera.
+                              </p>
+                            ) : scheduledPlanLabel && scheduledPlanEffectiveLabel ? (
+                              <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
+                                Votre abonnement actuel reste actif jusqu&apos;au {scheduledPlanEffectiveLabel}. &Agrave; cette date, Stripe basculera automatiquement sur {scheduledPlanLabel} avec ses cr&eacute;dits et son tarif.
+                              </p>
+                            ) : managedPeriodEndLabel ? (
+                              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                                Prochain renouvellement estim&eacute; le {managedPeriodEndLabel}. Les prochains mois restent factur&eacute;s au tarif habituel de votre plan.
+                              </p>
+                            ) : (
+                              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                                Votre abonnement reste actif et vos cr&eacute;dits se rechargent automatiquement &agrave; chaque cycle mensuel.
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[240px]">
+                            {scheduledPlanLabel ? (
+                              <motion.button
+                                type="button"
+                                onClick={handleClearScheduledPlanChange}
+                                whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                                whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                                disabled={checkoutTargetId !== null}
+                                className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                  checkoutTargetId === "clear-scheduled-plan"
+                                    ? "bg-white/10 text-white/60"
+                                    : "bg-white text-slate-900 hover:bg-slate-100"
+                                }`}
+                              >
+                                {checkoutTargetId === "clear-scheduled-plan" ? "Annulation..." : "Annuler le changement planifié"}
+                              </motion.button>
+                            ) : cancelAtPeriodEnd ? (
+                              <motion.button
+                                type="button"
+                                onClick={handleResumeSubscription}
+                                whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                                whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                                disabled={checkoutTargetId !== null}
+                                className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                  checkoutTargetId === "resume-subscription"
+                                    ? "bg-white/10 text-white/60"
+                                    : "bg-white text-slate-900 hover:bg-slate-100"
+                                }`}
+                              >
+                                {checkoutTargetId === "resume-subscription" ? "Réactivation..." : "Réactiver l'abonnement"}
+                              </motion.button>
+                            ) : (
+                              <motion.button
+                                type="button"
+                                onClick={handleCancelSubscription}
+                                whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                                whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                                disabled={checkoutTargetId !== null || !hasManagedSubscription || !hasPaidPlan}
+                                className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                  checkoutTargetId === "cancel-subscription"
+                                    ? "bg-white/10 text-white/60"
+                                    : "bg-white text-slate-900 hover:bg-slate-100"
+                                } disabled:bg-white/10 disabled:text-white/60`}
+                              >
+                                {checkoutTargetId === "cancel-subscription" ? "Programmation..." : "Programmer la résiliation"}
+                              </motion.button>
+                            )}
+                            <motion.button
+                              type="button"
+                              onClick={handleManageSubscription}
+                              whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                              whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                              disabled={checkoutTargetId !== null || !hasManagedSubscription}
+                              className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                checkoutTargetId === "portal"
+                                  ? "bg-white/10 text-white/60"
+                                  : "bg-white/10 text-white hover:bg-white/15"
+                              } disabled:bg-white/10 disabled:text-white/60`}
+                            >
+                              {checkoutTargetId === "portal" ? "Ouverture..." : "Paiement et factures"}
+                            </motion.button>
+                            <motion.button
+                              type="button"
+                              onClick={() => setActiveView("pricing")}
+                              whileHover={{ y: -2 }}
+                              whileTap={{ scale: 0.98 }}
+                              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/[0.06]"
+                            >
+                              Voir les tarifs
+                            </motion.button>
+                          </div>
+                        </div>
+                      </motion.section>
+
+                      {pendingPlanDisplay && hasPaidPlan && activePlanId !== pendingPlanDisplay.id && (
+                        <motion.section
+                          variants={fadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: 0.06 }}
+                          className="glass rounded-[26px] border border-amber-300/15 bg-amber-300/[0.04] p-5 sm:p-6"
+                        >
+                          <p className="text-xs uppercase tracking-[0.22em] text-amber-200">Confirmation</p>
+                          <h3 className="mt-1 text-xl font-semibold text-white">
+                            Passer &agrave; {pendingPlanDisplay.name}
+                          </h3>
+                          {hasManagedSubscription && managedPeriodEndLabel ? (
+                            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                              Vous conservez les avantages <span className="font-medium text-white">{activePlanLabel}</span> jusqu&apos;au {managedPeriodEndLabel}. &Agrave; partir de cette date, Stripe basculera sur <span className="font-medium text-white">{pendingPlanDisplay.name}</span>, avec un nouveau tarif de {pendingPlanDisplay.price}{pendingPlanDisplay.period} et {pendingPlanDisplay.credits.toLowerCase()} par cycle.
+                            </p>
+                          ) : (
+                            <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
+                              L&apos;abonnement Stripe doit encore &ecirc;tre rattach&eacute; proprement avant de confirmer ce changement de plan.
+                            </p>
+                          )}
+                          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+                            <motion.button
+                              type="button"
+                              onClick={() => handleSchedulePlanChange(pendingPlanDisplay.id)}
+                              whileHover={checkoutTargetId || !hasManagedSubscription ? undefined : { y: -2 }}
+                              whileTap={checkoutTargetId || !hasManagedSubscription ? undefined : { scale: 0.98 }}
+                              disabled={checkoutTargetId !== null || !hasManagedSubscription}
+                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 disabled:bg-white/10 disabled:text-white/60"
+                            >
+                              {checkoutTargetId === `schedule:${pendingPlanDisplay.id}` ? "Planification..." : "Confirmer ce changement"}
+                            </motion.button>
+                            <motion.button
+                              type="button"
+                              onClick={() => setPendingPlanSelection(null)}
+                              whileHover={checkoutTargetId ? undefined : { y: -2 }}
+                              whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
+                              disabled={checkoutTargetId !== null}
+                              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/[0.06] disabled:bg-white/10 disabled:text-white/60"
+                            >
+                              Annuler
+                            </motion.button>
+                          </div>
+                        </motion.section>
+                      )}
+
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <motion.section
+                          variants={fadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: 0.08 }}
+                          className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
+                        >
+                          <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Compte</p>
+                          <h3 className="mt-1 text-xl font-semibold text-white">Informations connectées</h3>
+                          <div className="mt-5 space-y-4">
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Nom</p>
+                              <p className="mt-2 text-sm text-slate-200">{user.name || "Compte Google"}</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Email</p>
+                              <p className="mt-2 text-sm text-slate-200">{user.email || "Adresse non disponible"}</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Calendrier</p>
+                              <p className="mt-2 text-sm leading-6 text-slate-300">
+                                Les événements sont créés sur votre agenda Google principal via la session actuellement connectée.
+                              </p>
+                            </div>
+                          </div>
+                        </motion.section>
+
+                        <motion.section
+                          variants={fadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: 0.12 }}
+                          className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
+                        >
+                          <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Session</p>
+                          <h3 className="mt-1 text-xl font-semibold text-white">Actions rapides</h3>
+                          <div className="mt-5 space-y-4">
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Crédits disponibles</p>
+                              <p className={`mt-2 text-2xl font-semibold ${creditAccentClass}`}>{availableCredits}</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Navigation</p>
+                              <p className="mt-2 text-sm leading-6 text-slate-300">
+                                Utilisez cette page pour gérer votre abonnement, confirmer un changement de plan futur et acheter des recharges si votre solde tombe &agrave; z&eacute;ro.
+                              </p>
+                            </div>
+                            <motion.button
+                              type="button"
+                              onClick={signOut}
+                              whileHover={{ y: -2 }}
+                              whileTap={{ scale: 0.98 }}
+                              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100"
+                            >
+                              Se déconnecter
+                            </motion.button>
+                          </div>
+                        </motion.section>
+                      </div>
 
                       {hasActiveSubscription && (
                         <motion.section
                           variants={fadeUp}
                           initial="hidden"
                           animate="visible"
-                          transition={{ delay: 0.16 }}
+                          transition={{ delay: 0.14 }}
                           className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
                         >
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -1741,7 +1962,7 @@ export default function App() {
                               <p className="text-xs uppercase tracking-[0.22em] text-amber-300">Recharges</p>
                               <h3 className="mt-1 text-xl font-semibold text-white">Crédits supplémentaires</h3>
                               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                                Les recharges servent de filet de sécurité. Elles sont débloquées uniquement si votre abonnement est actif et que votre solde atteint zéro.
+                                Les recharges servent de filet de sécurité. Elles sont moins rentables qu&apos;un abonnement et se débloquent uniquement si votre abonnement est actif et que votre solde atteint zéro.
                               </p>
                             </div>
                             {!canBuyTopUp && (
@@ -1761,7 +1982,7 @@ export default function App() {
                                   key={pack.id}
                                   initial={{ opacity: 0, y: 20 }}
                                   animate={{ opacity: 1, y: 0 }}
-                                  transition={{ delay: 0.18 + index * 0.06, duration: 0.3 }}
+                                  transition={{ delay: 0.16 + index * 0.06, duration: 0.3 }}
                                   className="rounded-2xl border border-white/6 bg-white/[0.02] p-5"
                                 >
                                   <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{pack.name}</p>
@@ -1805,25 +2026,16 @@ export default function App() {
                         variants={fadeUp}
                         initial="hidden"
                         animate="visible"
-                        transition={{ delay: 0.2 }}
+                        transition={{ delay: 0.16 }}
                         className="glass rounded-2xl border border-white/6 p-5 text-center"
                       >
-                        <p className="text-sm text-slate-400">
-                          Paiement s&eacute;curis&eacute; par <span className="font-medium text-white">Stripe</span>. Les abonnements alimentent automatiquement le solde &agrave; chaque cycle et les recharges restent moins rentables qu&apos;une mont&eacute;e de plan.
-                        </p>
-                        {checkoutTargetId && (
-                          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-cyan-200">
-                            Ouverture du checkout Stripe en cours...
-                          </p>
-                        )}
-                        {billingSuccess && (
-                          <p className="mt-3 text-sm text-emerald-300">
-                            {billingSuccess}
-                          </p>
-                        )}
-                        {billingError && (
-                          <p className="mt-3 text-sm text-amber-200">
-                            {billingError}
+                        {billingSuccess ? (
+                          <p className="text-sm text-emerald-300">{billingSuccess}</p>
+                        ) : billingError ? (
+                          <p className="text-sm text-amber-200">{billingError}</p>
+                        ) : (
+                          <p className="text-sm text-slate-400">
+                            Les opérations d&apos;abonnement passent par <span className="font-medium text-white">Stripe</span>. Les changements de plan supérieurs sont immédiats, les plans inférieurs et résiliations prennent effet à la fin de la période en cours.
                           </p>
                         )}
                       </motion.div>
