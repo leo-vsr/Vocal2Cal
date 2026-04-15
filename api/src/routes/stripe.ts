@@ -657,6 +657,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
   const planKey = plan;
   const credits = PLANS[planKey].credits;
   const isPlanChangeInvoice = invoice.billing_reason === "subscription_update";
+  const paymentIntentId = await getInvoicePaymentIntentId(invoice);
 
   return prisma.$transaction(async (tx) => {
     const existingPayment = await tx.payment.findUnique({
@@ -705,6 +706,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
         data: {
           userId,
           kind: "SUBSCRIPTION",
+          stripePaymentId: paymentIntentId,
           stripeInvoiceId: invoice.id,
           stripeSubscriptionId: subscription.id,
           plan: nextPlan,
@@ -750,6 +752,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
       data: {
         userId,
         kind: "SUBSCRIPTION",
+        stripePaymentId: paymentIntentId,
         stripeInvoiceId: invoice.id,
         stripeSubscriptionId: subscription.id,
         plan: planKey,
@@ -792,6 +795,31 @@ async function getLatestSubscriptionInvoice(subscription: Stripe.Subscription) {
 
   const stripe = getStripe();
   return stripe.invoices.retrieve(latestInvoiceId);
+}
+
+async function getInvoicePaymentIntentId(invoice: Stripe.Invoice) {
+  const stripe = getStripe();
+  const detailedInvoice =
+    invoice.payments?.data && invoice.payments.data.length > 0
+      ? invoice
+      : await stripe.invoices.retrieve(invoice.id, {
+          expand: ["payments.data.payment.payment_intent"],
+        });
+
+  for (const payment of detailedInvoice.payments?.data ?? []) {
+    if (payment.payment?.type !== "payment_intent") {
+      continue;
+    }
+
+    const paymentIntent = payment.payment.payment_intent;
+    if (!paymentIntent) {
+      continue;
+    }
+
+    return typeof paymentIntent === "string" ? paymentIntent : paymentIntent.id;
+  }
+
+  return null;
 }
 
 async function handleSubscriptionLifecycle(subscription: Stripe.Subscription) {
