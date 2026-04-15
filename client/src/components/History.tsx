@@ -153,7 +153,7 @@ const cardVariants = {
       },
     };
   },
-  hover: (index: number) => popProfiles[index % popProfiles.length].hover,
+  hover: {},
 };
 
 const cardContentVariants = {
