@@ -8,23 +8,23 @@ export const PLANS = {
   },
   STARTER: {
     name: "Starter",
-    price: 499, // cents
-    credits: 60,
-    description: "60 crédits / mois pour un usage occasionnel",
+    price: 299, // cents
+    credits: 30,
+    description: "30 crédits / mois pour un usage occasionnel",
     stripePriceId: process.env.STRIPE_PRICE_STARTER || null,
   },
   PRO: {
     name: "Pro",
-    price: 999,
-    credits: 180,
-    description: "180 crédits / mois pour un usage régulier",
+    price: 499,
+    credits: 75,
+    description: "75 crédits / mois pour un usage régulier",
     stripePriceId: process.env.STRIPE_PRICE_PRO || null,
   },
   BUSINESS: {
     name: "Business",
-    price: 1999,
-    credits: 600,
-    description: "600 crédits / mois pour les usages intensifs",
+    price: 999,
+    credits: 200,
+    description: "200 crédits / mois pour les usages intensifs",
     stripePriceId: process.env.STRIPE_PRICE_BUSINESS || null,
   },
 } as const;
@@ -41,22 +41,22 @@ export const PLAN_TIERS: Record<PlanKey, number> = {
 };
 
 export const TOP_UP_PACKS = {
-  BOOST_20: {
-    name: "Boost 20",
-    price: 199,
-    credits: 20,
+  BOOST_10: {
+    name: "Boost 10",
+    price: 99,
+    credits: 10,
     description: "Petit appoint pour terminer le mois sans changer d'offre",
   },
-  BOOST_80: {
-    name: "Boost 80",
-    price: 699,
-    credits: 80,
+  BOOST_30: {
+    name: "Boost 30",
+    price: 299,
+    credits: 30,
     description: "Recharge souple, volontairement moins rentable qu'un abonnement",
   },
-  BOOST_200: {
-    name: "Boost 200",
-    price: 1799,
-    credits: 200,
+  BOOST_75: {
+    name: "Boost 75",
+    price: 699,
+    credits: 75,
     description: "Gros appoint ponctuel, utile si vous êtes déjà abonné",
   },
 } as const;

@@ -71,7 +71,7 @@ Local URLs:
 ## Billing and Credits
 
 - New users start on the `FREE` plan with `5` credits.
-- `STARTER`, `PRO`, and `BUSINESS` grant `60`, `180`, and `600` credits per billing cycle.
+- `STARTER`, `PRO`, and `BUSINESS` grant `30`, `75`, and `200` credits per billing cycle.
 - Top-ups are only available to active subscribers whose balance has reached `0`.
 - One credit is deducted after a successful `parse-events` request that creates Google Calendar events.
 

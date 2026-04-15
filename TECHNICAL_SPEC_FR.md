@@ -84,13 +84,13 @@ Vocal2Cal est une application React + Express qui permet de dicter des demandes 
 
 - Les utilisateurs commencent sur le plan `FREE` avec `5` credits par defaut Prisma.
 - Plans payants :
-  - `STARTER` : `60` credits / mois
-  - `PRO` : `180` credits / mois
-  - `BUSINESS` : `600` credits / mois
+  - `STARTER` : `30` credits / mois
+  - `PRO` : `75` credits / mois
+  - `BUSINESS` : `200` credits / mois
 - Packs de recharge :
-  - `BOOST_20`
-  - `BOOST_80`
-  - `BOOST_200`
+  - `BOOST_10`
+  - `BOOST_30`
+  - `BOOST_75`
 - Les recharges sont reservees aux abonnes actifs dont le solde est tombe a `0`.
 - Comportements Stripe implementes :
   - souscription d'un nouvel abonnement

@@ -51,22 +51,22 @@ const PLAN_TIERS = {
 
 const PLAN_MONTHLY_CREDITS = {
   FREE: 5,
-  STARTER: 60,
-  PRO: 180,
-  BUSINESS: 600,
+  STARTER: 30,
+  PRO: 75,
+  BUSINESS: 200,
 } as const;
 
 const PRICING_PLANS = [
   { id: "FREE", name: "Découverte", price: "0€", period: "", credits: "5 crédits", desc: "Offerts à l'inscription", popular: false },
-  { id: "STARTER", name: "Starter", price: "4,99€", period: "/mois", credits: "60 crédits", desc: "Pour rester léger, sans exploser le budget", popular: false },
-  { id: "PRO", name: "Pro", price: "9,99€", period: "/mois", credits: "180 crédits", desc: "Le meilleur équilibre entre volume et prix", popular: true },
-  { id: "BUSINESS", name: "Business", price: "19,99€", period: "/mois", credits: "600 crédits", desc: "Pensé pour un usage intensif toute l'année", popular: false },
+  { id: "STARTER", name: "Starter", price: "2,99€", period: "/mois", credits: "30 crédits", desc: "Pour rester léger, sans exploser le budget", popular: false },
+  { id: "PRO", name: "Pro", price: "4,99€", period: "/mois", credits: "75 crédits", desc: "Le meilleur équilibre entre volume et prix", popular: true },
+  { id: "BUSINESS", name: "Business", price: "9,99€", period: "/mois", credits: "200 crédits", desc: "Pensé pour un usage intensif toute l'année", popular: false },
 ] as const;
 
 const TOP_UP_PACKS = [
-  { id: "BOOST_20", name: "Boost 20", price: "1,99€", credits: "20 crédits", desc: "Petit appoint pour terminer le mois sans changer d'offre" },
-  { id: "BOOST_80", name: "Boost 80", price: "6,99€", credits: "80 crédits", desc: "Recharge souple, volontairement moins rentable qu'un abonnement" },
-  { id: "BOOST_200", name: "Boost 200", price: "17,99€", credits: "200 crédits", desc: "Gros appoint ponctuel, utile si vous êtes déjà abonné" },
+  { id: "BOOST_10", name: "Boost 10", price: "0,99€", credits: "10 crédits", desc: "Petit appoint pour terminer le mois sans changer d'offre" },
+  { id: "BOOST_30", name: "Boost 30", price: "2,99€", credits: "30 crédits", desc: "Recharge souple, volontairement moins rentable qu'un abonnement" },
+  { id: "BOOST_75", name: "Boost 75", price: "6,99€", credits: "75 crédits", desc: "Gros appoint ponctuel, utile si vous êtes déjà abonné" },
 ] as const;
 
 type AppView = "home" | "dashboard" | "pricing" | "settings" | "admin";

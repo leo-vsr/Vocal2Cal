@@ -84,13 +84,13 @@ Vocal2Cal is a React + Express application that lets users dictate calendar requ
 
 - Users start on `FREE` with `5` credits by Prisma default.
 - Paid plans:
-  - `STARTER`: `60` credits / month
-  - `PRO`: `180` credits / month
-  - `BUSINESS`: `600` credits / month
+  - `STARTER`: `30` credits / month
+  - `PRO`: `75` credits / month
+  - `BUSINESS`: `200` credits / month
 - Top-up packs:
-  - `BOOST_20`
-  - `BOOST_80`
-  - `BOOST_200`
+  - `BOOST_10`
+  - `BOOST_30`
+  - `BOOST_75`
 - Top-ups are restricted to active subscribers whose balance has reached `0`.
 - Billing behaviors implemented in the API:
   - new subscription checkout
