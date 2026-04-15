@@ -643,7 +643,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
   const customerId = getStripeCustomerId(invoice.customer);
 
   if (!subscriptionId) {
-    return;
+    return null;
   }
 
   const stripe = getStripe();
@@ -652,20 +652,37 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
   const plan = getPlanFromSubscription(subscription);
 
   if (!userId || !plan) {
-    return;
+    return null;
   }
   const planKey = plan;
   const credits = PLANS[planKey].credits;
   const isPlanChangeInvoice = invoice.billing_reason === "subscription_update";
 
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const existingPayment = await tx.payment.findUnique({
       where: { stripeInvoiceId: invoice.id },
-      select: { id: true },
+      select: {
+        id: true,
+        plan: true,
+        creditsGranted: true,
+      },
     });
 
     if (existingPayment) {
-      return;
+      const existingUser = await tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          credits: true,
+          plan: true,
+        },
+      });
+
+      return {
+        applied: false,
+        credits: existingUser?.credits ?? 0,
+        creditsGranted: existingPayment.creditsGranted,
+        currentPlan: existingUser?.plan ?? existingPayment.plan,
+      };
     }
 
     if (isPlanChangeInvoice) {
@@ -709,7 +726,12 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
         });
       }
 
-      return;
+      return {
+        applied: true,
+        credits: updatedUser.credits,
+        creditsGranted: addedCredits,
+        currentPlan: nextPlan,
+      };
     }
 
     const updatedUser = await tx.user.update({
@@ -748,7 +770,28 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
         description: `${isInitialInvoice ? "Activation" : "Renouvellement"} ${PLANS[planKey].name} — ${credits} crédits`,
       },
     });
+
+    return {
+      applied: true,
+      credits: updatedUser.credits,
+      creditsGranted: credits,
+      currentPlan: planKey,
+    };
   });
+}
+
+async function getLatestSubscriptionInvoice(subscription: Stripe.Subscription) {
+  const latestInvoiceId =
+    typeof subscription.latest_invoice === "string"
+      ? subscription.latest_invoice
+      : subscription.latest_invoice?.id;
+
+  if (!latestInvoiceId) {
+    return null;
+  }
+
+  const stripe = getStripe();
+  return stripe.invoices.retrieve(latestInvoiceId);
 }
 
 async function handleSubscriptionLifecycle(subscription: Stripe.Subscription) {
@@ -1095,10 +1138,32 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       fallbackPlan: targetPlan,
     });
 
+    const latestInvoice = await getLatestSubscriptionInvoice(updatedSubscription);
+    const invoiceResult =
+      latestInvoice?.status === "paid" ? await handleInvoicePaid(latestInvoice) : null;
+    const refreshedUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        credits: true,
+        plan: true,
+      },
+    });
+    const settledPlan = invoiceResult?.currentPlan ?? refreshedUser?.plan ?? targetPlan;
+    const settledCredits = invoiceResult?.credits ?? refreshedUser?.credits ?? user.credits;
+    const creditsDelta = invoiceResult?.creditsGranted ?? 0;
+    const paymentSettled = latestInvoice?.status === "paid";
+
     res.json({
       success: true,
-      currentPlan: targetPlan,
-      message: `Votre plan ${PLANS[targetPlan].name} a été mis à jour. Stripe facture immédiatement le prorata du cycle en cours.`,
+      currentPlan: settledPlan,
+      credits: settledCredits,
+      creditsDelta,
+      invoiceStatus: latestInvoice?.status ?? null,
+      message: paymentSettled
+        ? creditsDelta > 0
+          ? `Votre plan ${PLANS[targetPlan].name} est actif. Stripe a confirmé le prorata du cycle et ${creditsDelta} crédits supplémentaires ont été ajoutés immédiatement.`
+          : `Votre plan ${PLANS[targetPlan].name} est actif. Stripe a confirmé le prorata du cycle en cours.`
+        : `Votre plan ${PLANS[targetPlan].name} a été mis à jour. La confirmation de paiement et les crédits du cycle sont en cours de synchronisation.`,
     });
   } catch (error) {
     console.error("Erreur changement de plan Stripe:", error);

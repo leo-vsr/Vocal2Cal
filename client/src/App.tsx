@@ -204,14 +204,6 @@ function getPlanLabel(planId: string | null) {
   return PLAN_LABELS[planId as keyof typeof PLAN_LABELS] || planId;
 }
 
-function getPlanDisplay(planId: string | null) {
-  if (!planId) {
-    return null;
-  }
-
-  return PRICING_PLANS.find((plan) => plan.id === planId) ?? null;
-}
-
 function formatEuroCents(amount: number) {
   return new Intl.NumberFormat("fr-FR", {
     style: "currency",
@@ -228,6 +220,15 @@ interface PlanChangePreview {
   nextRecurringAmount: number;
   amountDueToday: number;
   prorationDate: number | null;
+}
+
+interface PlanChangeResponse {
+  success: boolean;
+  currentPlan: string;
+  credits?: number;
+  creditsDelta?: number;
+  invoiceStatus?: string | null;
+  message?: string;
 }
 
 function useRotatingTypewriter(phrases: string[], typeSpeed = 70, eraseSpeed = 40, startDelay = 600, holdDelay = 2200) {
@@ -294,7 +295,6 @@ export default function App() {
   const [accountUsage, setAccountUsage] = useState<UsageData | null>(null);
   const [subscriptionManagement, setSubscriptionManagement] = useState<SubscriptionManagementData | null>(null);
   const [checkoutTargetId, setCheckoutTargetId] = useState<string | null>(null);
-  const [pendingPlanSelection, setPendingPlanSelection] = useState<string | null>(null);
   const [planChangePreview, setPlanChangePreview] = useState<PlanChangePreview | null>(null);
   const [cancelConfirmationOpen, setCancelConfirmationOpen] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
@@ -305,6 +305,7 @@ export default function App() {
   const wheelResetTimeoutRef = useRef<number | null>(null);
   const swipeCooldownTimeoutRef = useRef<number | null>(null);
   const swipeHintTimeoutRef = useRef<number | null>(null);
+  const billingRefreshTimeoutsRef = useRef<number[]>([]);
   const swipeLockedRef = useRef(false);
   const activePlanId = accountUsage?.plan ?? user?.plan ?? "FREE";
   const activePlanLabel = PLAN_LABELS[activePlanId as keyof typeof PLAN_LABELS] || activePlanId;
@@ -320,7 +321,6 @@ export default function App() {
   const scheduledPlanLabel = getPlanLabel(scheduledPlanId);
   const scheduledPlanEffectiveDate = subscriptionManagement?.scheduledPlanEffectiveDate ?? managedPeriodEnd;
   const scheduledPlanEffectiveLabel = formatFrenchDate(scheduledPlanEffectiveDate ?? null);
-  const pendingPlanDisplay = getPlanDisplay(pendingPlanSelection);
   const cancelAtPeriodEnd = subscriptionManagement?.cancelAtPeriodEnd ?? false;
   const hasManagedSubscription = subscriptionManagement?.hasManagedSubscription ?? false;
   const creditAccentClass =
@@ -329,6 +329,50 @@ export default function App() {
       : availableCredits <= 10
         ? "text-amber-200"
         : "text-cyan-100";
+
+  const clearBillingRefreshTimeouts = () => {
+    billingRefreshTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    billingRefreshTimeoutsRef.current = [];
+  };
+
+  const scheduleBillingRefresh = (delays: number[] = [1500, 4500]) => {
+    clearBillingRefreshTimeouts();
+    setUsageRefresh((value) => value + 1);
+    billingRefreshTimeoutsRef.current = delays.map((delay) =>
+      window.setTimeout(() => {
+        setUsageRefresh((value) => value + 1);
+      }, delay)
+    );
+  };
+
+  const applyImmediatePlanState = (planId: string, credits?: number) => {
+    setAccountUsage((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextCredits = typeof credits === "number" ? credits : current.credits;
+      return {
+        ...current,
+        plan: planId,
+        credits: nextCredits,
+        canBuyTopUp: current.subscription.isActive ? nextCredits <= 0 : current.canBuyTopUp,
+      };
+    });
+
+    setSubscriptionManagement((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        currentPlan: planId,
+        scheduledPlan: null,
+        scheduledPlanEffectiveDate: null,
+      };
+    });
+  };
 
   useEffect(() => {
     if (!user) {
@@ -344,17 +388,6 @@ export default function App() {
     const purchasedPack = params.get("pack");
     const billingState = params.get("billing");
     const upgradedPlan = params.get("plan");
-    const refreshTimeouts: number[] = [];
-
-    const scheduleUsageRefresh = () => {
-      setUsageRefresh((value) => value + 1);
-      refreshTimeouts.push(
-        window.setTimeout(() => setUsageRefresh((value) => value + 1), 1500)
-      );
-      refreshTimeouts.push(
-        window.setTimeout(() => setUsageRefresh((value) => value + 1), 4500)
-      );
-    };
 
     if (paymentState === "success") {
       if (paymentType === "subscription") {
@@ -362,15 +395,14 @@ export default function App() {
           ? PLAN_LABELS[purchasedPlan as keyof typeof PLAN_LABELS]
           : "votre abonnement";
         setBillingSuccess(`${planName} activé. Les crédits du cycle sont en cours de synchronisation.`);
-        setPendingPlanSelection(null);
         setPlanChangePreview(null);
         setActiveView("settings");
-        scheduleUsageRefresh();
+        scheduleBillingRefresh();
       } else if (paymentType === "topup") {
         const packName = TOP_UP_PACKS.find((pack) => pack.id === purchasedPack)?.name || "La recharge";
         setBillingSuccess(`${packName} confirmée. Le solde est en cours de mise à jour.`);
         setActiveView("settings");
-        scheduleUsageRefresh();
+        scheduleBillingRefresh();
       }
 
       params.delete("payment");
@@ -388,10 +420,8 @@ export default function App() {
         : "votre nouveau plan";
       setBillingSuccess(`${planName} activé. Stripe a confirmé le prorata du mois en cours.`);
       setCancelConfirmationOpen(false);
-      setPendingPlanSelection(null);
       setPlanChangePreview(null);
-      setActiveView("settings");
-      scheduleUsageRefresh();
+      scheduleBillingRefresh();
       params.delete("billing");
       params.delete("plan");
     } else if (billingState === "scheduled") {
@@ -400,18 +430,17 @@ export default function App() {
         : "votre prochain plan";
       setBillingSuccess(`${planName} est maintenant planifié pour la prochaine échéance Stripe.`);
       setCancelConfirmationOpen(false);
-      setPendingPlanSelection(null);
       setPlanChangePreview(null);
-      setActiveView("settings");
-      scheduleUsageRefresh();
+      scheduleBillingRefresh();
       params.delete("billing");
       params.delete("plan");
     } else if (billingState === "canceled") {
       setBillingSuccess("La résiliation est programmée. Votre abonnement reste actif jusqu'à la fin du cycle en cours.");
       setCancelConfirmationOpen(false);
       setPlanChangePreview(null);
-      setActiveView("settings");
-      scheduleUsageRefresh();
+      scheduleBillingRefresh();
+      params.delete("billing");
+    } else if (billingState === "return") {
       params.delete("billing");
     }
 
@@ -422,9 +451,6 @@ export default function App() {
       `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
     );
 
-    return () => {
-      refreshTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
-    };
   }, []);
 
   useEffect(() => {
@@ -462,6 +488,7 @@ export default function App() {
 
   useEffect(() => {
     return () => {
+      clearBillingRefreshTimeouts();
       if (wheelResetTimeoutRef.current) {
         window.clearTimeout(wheelResetTimeoutRef.current);
       }
@@ -687,10 +714,11 @@ export default function App() {
         return;
       }
 
-      setBillingSuccess(data.message || "Changement de plan appliqué.");
+      const result = data as PlanChangeResponse;
+      applyImmediatePlanState(result.currentPlan, result.credits);
+      setBillingSuccess(result.message || "Changement de plan appliqué.");
       setPlanChangePreview(null);
-      setUsageRefresh((value) => value + 1);
-      setActiveView("settings");
+      scheduleBillingRefresh();
     } catch {
       setBillingError("Impossible de changer de plan");
     } finally {
@@ -698,17 +726,12 @@ export default function App() {
     }
   };
 
-  const handlePrepareScheduledPlanChange = (targetPlanId: string) => {
-    setBillingError(null);
-    setBillingSuccess(null);
-    setPlanChangePreview(null);
-    setPendingPlanSelection(targetPlanId);
-  };
-
-  const handleSchedulePlanChange = async (targetPlanId: string) => {
-    if (checkoutTargetId) {
+  const handleConfirmScheduledPlanChange = async () => {
+    if (!planChangePreview || planChangePreview.mode !== "downgrade" || checkoutTargetId) {
       return;
     }
+
+    const targetPlanId = planChangePreview.targetPlan;
 
     setBillingError(null);
     setBillingSuccess(null);
@@ -729,9 +752,20 @@ export default function App() {
       }
 
       setBillingSuccess(data.message || "Changement de plan programmé.");
-      setPendingPlanSelection(null);
-      setUsageRefresh((value) => value + 1);
-      setActiveView("settings");
+      setPlanChangePreview(null);
+      setSubscriptionManagement((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          scheduledPlan: data.scheduledPlan ?? targetPlanId,
+          scheduledPlanEffectiveDate: data.effectiveDate ?? current.scheduledPlanEffectiveDate,
+          cancelAtPeriodEnd: false,
+        };
+      });
+      scheduleBillingRefresh();
     } catch {
       setBillingError("Impossible de planifier ce changement");
     } finally {
@@ -762,9 +796,19 @@ export default function App() {
       }
 
       setBillingSuccess(data.message || "Changement planifié annulé.");
-      setPendingPlanSelection(null);
-      setUsageRefresh((value) => value + 1);
-      setActiveView("settings");
+      setPlanChangePreview(null);
+      setSubscriptionManagement((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          scheduledPlan: null,
+          scheduledPlanEffectiveDate: null,
+        };
+      });
+      scheduleBillingRefresh();
     } catch {
       setBillingError("Impossible d'annuler le changement planifié");
     } finally {
@@ -779,7 +823,6 @@ export default function App() {
 
     setBillingError(null);
     setBillingSuccess(null);
-    setPendingPlanSelection(null);
     setPlanChangePreview(null);
     setCancelConfirmationOpen(false);
     setCheckoutTargetId("cancel-subscription");
@@ -797,8 +840,20 @@ export default function App() {
       }
 
       setBillingSuccess(data.message || "Résiliation programmée.");
-      setUsageRefresh((value) => value + 1);
-      setActiveView("settings");
+      setSubscriptionManagement((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          cancelAtPeriodEnd: true,
+          currentPeriodEnd: data.currentPeriodEnd ?? current.currentPeriodEnd,
+          scheduledPlan: null,
+          scheduledPlanEffectiveDate: null,
+        };
+      });
+      scheduleBillingRefresh();
     } catch {
       setBillingError("Impossible de programmer la résiliation");
     } finally {
@@ -813,7 +868,6 @@ export default function App() {
 
     setBillingError(null);
     setBillingSuccess(null);
-    setPendingPlanSelection(null);
     setPlanChangePreview(null);
     setCancelConfirmationOpen(false);
     setCheckoutTargetId("resume-subscription");
@@ -831,8 +885,17 @@ export default function App() {
       }
 
       setBillingSuccess(data.message || "Abonnement réactivé.");
-      setUsageRefresh((value) => value + 1);
-      setActiveView("settings");
+      setSubscriptionManagement((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          cancelAtPeriodEnd: false,
+        };
+      });
+      scheduleBillingRefresh();
     } catch {
       setBillingError("Impossible de reprendre l'abonnement");
     } finally {
@@ -1674,10 +1737,16 @@ export default function App() {
                           const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
                           const isScheduledPlanChangeLoading = checkoutTargetId === `schedule:${plan.id}`;
                           const isScheduledPlan = scheduledPlanId === plan.id;
+                          const canModifyManagedPlan =
+                            isEffectivelySubscribed &&
+                            hasManagedSubscription &&
+                            !cancelAtPeriodEnd &&
+                            (isHigherPlan || isLowerPlan);
                           const isDisabled =
                             isFreePlan ||
                             isCurrentDisplayedPlan ||
                             isScheduledPlan ||
+                            ((isHigherPlan || isLowerPlan) && !canModifyManagedPlan) ||
                             checkoutTargetId !== null;
 
                           return (
@@ -1716,13 +1785,11 @@ export default function App() {
                               onClick={
                                 isCurrentDisplayedPlan
                                   ? undefined
-                                  : isEffectivelySubscribed && isHigherPlan
+                                  : !isFreePlan && canModifyManagedPlan
                                     ? () => handleOpenPlanChangePreview(plan.id)
-                                    : isEffectivelySubscribed && isLowerPlan
-                                      ? () => handlePrepareScheduledPlanChange(plan.id)
-                                      : !isFreePlan && !isEffectivelySubscribed
-                                    ? () => handleCheckout({ planId: plan.id })
-                                    : undefined
+                                    : !isFreePlan && !isEffectivelySubscribed
+                                      ? () => handleCheckout({ planId: plan.id })
+                                      : undefined
                               }
                               disabled={isDisabled}
                               aria-busy={isCheckoutLoading || isPreviewLoading || isPlanChangeLoading || isScheduledPlanChangeLoading}
@@ -1750,11 +1817,17 @@ export default function App() {
                                   ? "Plan actuel"
                                   : isScheduledPlan
                                     ? "Déjà planifié"
-                                    : isPreviewLoading || isPlanChangeLoading || isCheckoutLoading
-                                      ? "Redirection..."
-                                    : isScheduledPlanChangeLoading
-                                      ? "Planification..."
-                                      : "Passer à ce plan"}
+                                    : isCheckoutLoading
+                                      ? "Redirection vers Stripe..."
+                                    : isPreviewLoading
+                                      ? isHigherPlan
+                                        ? "Calcul du prorata..."
+                                        : "Préparation..."
+                                    : isPlanChangeLoading
+                                      ? "Changement..."
+                                      : isScheduledPlanChangeLoading
+                                        ? "Planification..."
+                                        : "Passer à ce plan"}
                             </motion.button>
                             </motion.div>
                           );
@@ -1771,11 +1844,6 @@ export default function App() {
                         <p className="text-sm text-slate-400">
                           Paiement s&eacute;curis&eacute; par <span className="font-medium text-white">Stripe</span>. Les abonnements alimentent automatiquement le solde &agrave; chaque cycle et les recharges restent moins rentables qu&apos;une mont&eacute;e de plan.
                         </p>
-                        {checkoutTargetId && (
-                          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-cyan-200">
-                            Ouverture du checkout Stripe en cours...
-                          </p>
-                        )}
                         {billingSuccess && (
                           <p className="mt-3 text-sm text-emerald-300">
                             {billingSuccess}
@@ -1895,7 +1963,7 @@ export default function App() {
                                     : "bg-white text-slate-900 hover:bg-slate-100"
                                 } disabled:bg-white/10 disabled:text-white/60`}
                               >
-                                {checkoutTargetId === "cancel-subscription" ? "Ouverture..." : "Programmer la résiliation"}
+                                {checkoutTargetId === "cancel-subscription" ? "Programmation..." : "Programmer la résiliation"}
                               </motion.button>
                             )}
                             <motion.button
@@ -1910,7 +1978,7 @@ export default function App() {
                                   : "bg-white/10 text-white hover:bg-white/15"
                               } disabled:bg-white/10 disabled:text-white/60`}
                             >
-                              {checkoutTargetId === "portal" ? "Ouverture..." : "Paiement et factures"}
+                              {checkoutTargetId === "portal" ? "Redirection..." : "Paiement et factures"}
                             </motion.button>
                             <motion.button
                               type="button"
@@ -1925,48 +1993,113 @@ export default function App() {
                         </div>
                       </motion.section>
 
-                      {pendingPlanDisplay && hasPaidPlan && activePlanId !== pendingPlanDisplay.id && (
+                      {hasPaidPlan && (
                         <motion.section
                           variants={fadeUp}
                           initial="hidden"
                           animate="visible"
                           transition={{ delay: 0.06 }}
-                          className="glass rounded-[26px] border border-amber-300/15 bg-amber-300/[0.04] p-5 sm:p-6"
+                          className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
                         >
-                          <p className="text-xs uppercase tracking-[0.22em] text-amber-200">Confirmation</p>
-                          <h3 className="mt-1 text-xl font-semibold text-white">
-                            Programmer le passage &agrave; {pendingPlanDisplay.name}
-                          </h3>
-                          {hasManagedSubscription && managedPeriodEndLabel ? (
-                            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                              Vous conservez les avantages <span className="font-medium text-white">{activePlanLabel}</span> jusqu&apos;au {managedPeriodEndLabel}. &Agrave; partir de cette date, votre abonnement passera sur <span className="font-medium text-white">{pendingPlanDisplay.name}</span>, avec un tarif de {pendingPlanDisplay.price}{pendingPlanDisplay.period} et {pendingPlanDisplay.credits.toLowerCase()} par cycle. Vous pourrez encore annuler ce changement avant sa date d&apos;effet depuis cette page.
-                            </p>
-                          ) : (
-                            <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
-                              L&apos;abonnement Stripe doit encore &ecirc;tre rattach&eacute; proprement avant de confirmer ce changement de plan.
-                            </p>
-                          )}
-                          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                            <motion.button
-                              type="button"
-                              onClick={() => handleSchedulePlanChange(pendingPlanDisplay.id)}
-                              whileHover={checkoutTargetId || !hasManagedSubscription ? undefined : { y: -2 }}
-                              whileTap={checkoutTargetId || !hasManagedSubscription ? undefined : { scale: 0.98 }}
-                              disabled={checkoutTargetId !== null || !hasManagedSubscription}
-                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 disabled:bg-white/10 disabled:text-white/60"
-                            >
-                              {checkoutTargetId === `schedule:${pendingPlanDisplay.id}` ? "Planification..." : "Confirmer ce changement"}
-                            </motion.button>
-                            <motion.button
-                              type="button"
-                              onClick={() => setPendingPlanSelection(null)}
-                              whileHover={checkoutTargetId ? undefined : { y: -2 }}
-                              whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
-                              disabled={checkoutTargetId !== null}
-                              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/[0.06] disabled:bg-white/10 disabled:text-white/60"
-                            >
-                              Garder mon plan actuel
-                            </motion.button>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Changer de plan</p>
+                              <h3 className="mt-1 text-xl font-semibold text-white">Ajuster votre abonnement</h3>
+                              {cancelAtPeriodEnd ? (
+                                <p className="mt-2 max-w-2xl text-sm leading-6 text-rose-100/90">
+                                  Réactivez d&apos;abord l&apos;abonnement si vous souhaitez préparer un autre changement de plan.
+                                </p>
+                              ) : !hasManagedSubscription ? (
+                                <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
+                                  Les changements immédiats restent indisponibles tant que l&apos;abonnement Stripe actif n&apos;est pas rattaché proprement.
+                                </p>
+                              ) : (
+                                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                                  Un plan supérieur applique un prorata immédiat. Un plan inférieur est programmé pour la prochaine échéance sans quitter cette page.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                            {PRICING_PLANS.filter((plan) => plan.id !== "FREE").map((plan) => {
+                              const isCurrentPlan = activePlanId === plan.id;
+                              const isHigherPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] > PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
+                              const isLowerPlan = PLAN_TIERS[plan.id as keyof typeof PLAN_TIERS] < PLAN_TIERS[activePlanId as keyof typeof PLAN_TIERS];
+                              const isPreviewLoading = checkoutTargetId === `preview:${plan.id}`;
+                              const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
+                              const isScheduledPlanChangeLoading = checkoutTargetId === `schedule:${plan.id}`;
+                              const isScheduledPlan = scheduledPlanId === plan.id;
+                              const isActionDisabled =
+                                isCurrentPlan ||
+                                isScheduledPlan ||
+                                cancelAtPeriodEnd ||
+                                !hasManagedSubscription ||
+                                checkoutTargetId !== null;
+
+                              return (
+                                <div
+                                  key={`settings-${plan.id}`}
+                                  className={`rounded-2xl border p-5 ${
+                                    plan.id === activePlanId
+                                      ? "border-cyan-400/20 bg-cyan-400/[0.05]"
+                                      : "border-white/6 bg-white/[0.02]"
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{plan.name}</p>
+                                      <p className="mt-3 text-2xl font-semibold text-white">{plan.price}</p>
+                                      <p className="mt-1 text-sm font-medium text-cyan-300">{plan.credits}</p>
+                                    </div>
+                                    {isCurrentPlan && (
+                                      <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100">
+                                        Actuel
+                                      </div>
+                                    )}
+                                  </div>
+                                  <p className="mt-3 min-h-[3rem] text-sm text-slate-400">{plan.desc}</p>
+                                  <motion.button
+                                    type="button"
+                                    whileHover={!isActionDisabled ? { y: -2 } : undefined}
+                                    whileTap={!isActionDisabled ? { scale: 0.98 } : undefined}
+                                    onClick={
+                                      !isActionDisabled && (isHigherPlan || isLowerPlan)
+                                        ? () => handleOpenPlanChangePreview(plan.id)
+                                        : undefined
+                                    }
+                                    disabled={isActionDisabled}
+                                    className={`mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
+                                      isActionDisabled
+                                        ? "bg-white/10 text-white/60"
+                                        : "bg-white text-slate-900 hover:bg-slate-100"
+                                    }`}
+                                  >
+                                    {(isPreviewLoading || isPlanChangeLoading || isScheduledPlanChangeLoading) && (
+                                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                      </svg>
+                                    )}
+                                    {isCurrentPlan
+                                      ? "Plan actuel"
+                                      : isScheduledPlan
+                                        ? "Déjà planifié"
+                                        : isPreviewLoading
+                                          ? isHigherPlan
+                                            ? "Calcul du prorata..."
+                                            : "Préparation..."
+                                        : isPlanChangeLoading
+                                          ? "Changement..."
+                                          : isScheduledPlanChangeLoading
+                                            ? "Planification..."
+                                            : isHigherPlan
+                                              ? "Monter de plan"
+                                              : "Programmer ce plan"}
+                                  </motion.button>
+                                </div>
+                              );
+                            })}
                           </div>
                         </motion.section>
                       )}
@@ -2173,7 +2306,7 @@ export default function App() {
       </main>
 
       <AnimatePresence>
-        {planChangePreview && planChangePreview.mode === "upgrade" && (
+        {planChangePreview && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2189,34 +2322,71 @@ export default function App() {
               onClick={(event) => event.stopPropagation()}
               className="glass-strong w-full max-w-lg rounded-[28px] border border-white/10 p-6 shadow-[0_24px_80px_rgba(6,10,20,0.45)]"
             >
-              <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Confirmation</p>
+              <p className={`text-xs uppercase tracking-[0.22em] ${
+                planChangePreview.mode === "upgrade" ? "text-cyan-200" : "text-amber-200"
+              }`}
+              >
+                Confirmation
+              </p>
               <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                Passer &agrave; {getPlanLabel(planChangePreview.targetPlan)}
+                {planChangePreview.mode === "upgrade"
+                  ? `Passer à ${getPlanLabel(planChangePreview.targetPlan)}`
+                  : `Programmer le passage à ${getPlanLabel(planChangePreview.targetPlan)}`}
               </h3>
               <p className="mt-3 text-sm leading-6 text-slate-300">
-                Le changement est immédiat. Stripe appliquera le prorata du cycle en cours, puis les prochains mois repartiront au tarif habituel.
+                {planChangePreview.mode === "upgrade"
+                  ? "Le changement est immédiat. Stripe appliquera le prorata du cycle en cours, puis les prochains mois repartiront au tarif habituel."
+                  : "Votre plan actuel reste actif jusqu'à la prochaine échéance. Stripe basculera ensuite automatiquement sur cette offre, sans repasser par une page de paiement."}
               </p>
 
               <div className="mt-5 space-y-3">
-                <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Montant estimé dû aujourd&apos;hui</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{formatEuroCents(planChangePreview.amountDueToday)}</p>
-                </div>
-                <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
-                  À partir du <span className="font-medium text-white">{formatFrenchDate(planChangePreview.currentPeriodEnd)}</span>, votre abonnement sera renouvelé à <span className="font-medium text-white">{formatEuroCents(planChangePreview.nextRecurringAmount)}</span> par mois.
-                </div>
+                {planChangePreview.mode === "upgrade" ? (
+                  <>
+                    <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Montant estimé dû aujourd&apos;hui</p>
+                      <p className="mt-2 text-2xl font-semibold text-white">{formatEuroCents(planChangePreview.amountDueToday)}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
+                      À partir du <span className="font-medium text-white">{formatFrenchDate(planChangePreview.currentPeriodEnd)}</span>, votre abonnement sera renouvelé à <span className="font-medium text-white">{formatEuroCents(planChangePreview.nextRecurringAmount)}</span> par mois.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Date d&apos;effet</p>
+                      <p className="mt-2 text-2xl font-semibold text-white">{formatFrenchDate(planChangePreview.effectiveDate) || "Prochaine échéance"}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
+                      À partir de cette date, votre abonnement sera renouvelé à <span className="font-medium text-white">{formatEuroCents(planChangePreview.nextRecurringAmount)}</span> par mois avec{" "}
+                      <span className="font-medium text-white">
+                        {(PRICING_PLANS.find((plan) => plan.id === planChangePreview.targetPlan)?.credits || "les crédits du plan").toLowerCase()}
+                      </span>{" "}
+                      par cycle.
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                 <motion.button
                   type="button"
-                  onClick={handleConfirmUpgrade}
+                  onClick={
+                    planChangePreview.mode === "upgrade"
+                      ? handleConfirmUpgrade
+                      : handleConfirmScheduledPlanChange
+                  }
                   whileHover={checkoutTargetId ? undefined : { y: -2 }}
                   whileTap={checkoutTargetId ? undefined : { scale: 0.98 }}
                   disabled={checkoutTargetId !== null}
                   className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 disabled:bg-white/10 disabled:text-white/60"
                 >
-                  {checkoutTargetId === `change:${planChangePreview.targetPlan}` ? "Application..." : "Confirmer le changement"}
+                  {planChangePreview.mode === "upgrade"
+                    ? checkoutTargetId === `change:${planChangePreview.targetPlan}`
+                      ? "Application..."
+                      : "Confirmer le changement"
+                    : checkoutTargetId === `schedule:${planChangePreview.targetPlan}`
+                      ? "Planification..."
+                      : "Confirmer ce changement"}
                 </motion.button>
                 <motion.button
                   type="button"
@@ -2226,7 +2396,7 @@ export default function App() {
                   disabled={checkoutTargetId !== null}
                   className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/[0.06] disabled:bg-white/10 disabled:text-white/60"
                 >
-                  Garder mon plan actuel
+                  {planChangePreview.mode === "upgrade" ? "Garder mon plan actuel" : "Ne rien changer"}
                 </motion.button>
               </div>
             </motion.div>
