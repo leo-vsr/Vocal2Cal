@@ -1161,9 +1161,9 @@ router.post("/change-plan", requireAuth, async (req: Request, res: Response) => 
       invoiceStatus: latestInvoice?.status ?? null,
       message: paymentSettled
         ? creditsDelta > 0
-          ? `Votre plan ${PLANS[targetPlan].name} est actif. Stripe a confirmé le prorata du cycle et ${creditsDelta} crédits supplémentaires ont été ajoutés immédiatement.`
-          : `Votre plan ${PLANS[targetPlan].name} est actif. Stripe a confirmé le prorata du cycle en cours.`
-        : `Votre plan ${PLANS[targetPlan].name} a été mis à jour. La confirmation de paiement et les crédits du cycle sont en cours de synchronisation.`,
+          ? `${PLANS[targetPlan].name} activé. +${creditsDelta} crédits ajoutés.`
+          : `${PLANS[targetPlan].name} activé.`
+        : `${PLANS[targetPlan].name} activé. Synchronisation en cours.`,
     });
   } catch (error) {
     console.error("Erreur changement de plan Stripe:", error);
@@ -1311,7 +1311,7 @@ router.post("/schedule-plan-change", requireAuth, async (req: Request, res: Resp
     const schedule = await getOrCreateManagedSchedule(currentSubscription);
     const stripe = getStripe();
     await stripe.subscriptionSchedules.update(schedule.id, {
-      end_behavior: "renew",
+      end_behavior: "release",
       proration_behavior: "none",
       phases: [
         {
@@ -1343,7 +1343,7 @@ router.post("/schedule-plan-change", requireAuth, async (req: Request, res: Resp
       success: true,
       scheduledPlan: targetPlan,
       effectiveDate: new Date(currentPeriodEnd * 1000).toISOString(),
-      message: `Votre plan ${PLANS[user.plan].name} reste actif jusqu'au ${new Date(currentPeriodEnd * 1000).toLocaleDateString("fr-FR")}. Ensuite, Stripe basculera automatiquement sur ${PLANS[targetPlan].name}.`,
+      message: `${PLANS[targetPlan].name} sera actif le ${new Date(currentPeriodEnd * 1000).toLocaleDateString("fr-FR")}.`,
     });
   } catch (error) {
     console.error("Erreur planification changement de plan Stripe:", error);
@@ -1387,7 +1387,7 @@ router.post("/clear-scheduled-plan-change", requireAuth, async (req: Request, re
 
     res.json({
       success: true,
-      message: `Le changement planifié a été annulé. Votre plan ${PLANS[user.plan].name} continuera à se renouveler normalement.`,
+      message: "Le changement planifié a été annulé.",
     });
   } catch (error) {
     console.error("Erreur annulation changement planifié Stripe:", error);
@@ -1442,8 +1442,8 @@ router.post("/cancel-subscription", requireAuth, async (req: Request, res: Respo
       success: true,
       currentPeriodEnd: endDate,
       message: endDate
-        ? `Votre abonnement restera actif jusqu'au ${new Date(endDate).toLocaleDateString("fr-FR")}, puis il s'arrêtera automatiquement.`
-        : "Votre résiliation a bien été programmée en fin de période.",
+        ? `Résiliation prévue le ${new Date(endDate).toLocaleDateString("fr-FR")}.`
+        : "La résiliation a été programmée.",
     });
   } catch (error) {
     console.error("Erreur résiliation abonnement Stripe:", error);
@@ -1493,7 +1493,7 @@ router.post("/resume-subscription", requireAuth, async (req: Request, res: Respo
 
     res.json({
       success: true,
-      message: "La résiliation planifiée a été retirée. Votre abonnement continuera normalement.",
+      message: "La résiliation a été annulée.",
     });
   } catch (error) {
     console.error("Erreur reprise abonnement Stripe:", error);

@@ -231,6 +231,12 @@ interface PlanChangeResponse {
   message?: string;
 }
 
+interface ToastItem {
+  id: number;
+  tone: "success" | "error" | "info";
+  message: string;
+}
+
 function useRotatingTypewriter(phrases: string[], typeSpeed = 70, eraseSpeed = 40, startDelay = 600, holdDelay = 2200) {
   const [displayed, setDisplayed] = useState("");
   const [isTyping, setIsTyping] = useState(true);
@@ -299,6 +305,7 @@ export default function App() {
   const [cancelConfirmationOpen, setCancelConfirmationOpen] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingSuccess, setBillingSuccess] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
   const { displayed: typedText, isTyping } = useRotatingTypewriter(rotatingPhrases);
   const viewTabs = user?.role === "ADMIN" ? [...baseViewTabs, adminTab] : baseViewTabs;
   const wheelDeltaRef = useRef(0);
@@ -306,6 +313,8 @@ export default function App() {
   const swipeCooldownTimeoutRef = useRef<number | null>(null);
   const swipeHintTimeoutRef = useRef<number | null>(null);
   const billingRefreshTimeoutsRef = useRef<number[]>([]);
+  const toastTimeoutsRef = useRef<number[]>([]);
+  const toastIdRef = useRef(0);
   const swipeLockedRef = useRef(false);
   const activePlanId = accountUsage?.plan ?? user?.plan ?? "FREE";
   const activePlanLabel = PLAN_LABELS[activePlanId as keyof typeof PLAN_LABELS] || activePlanId;
@@ -333,6 +342,25 @@ export default function App() {
   const clearBillingRefreshTimeouts = () => {
     billingRefreshTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     billingRefreshTimeoutsRef.current = [];
+  };
+
+  const dismissToast = (toastId: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== toastId));
+  };
+
+  const pushToast = (
+    message: string,
+    tone: ToastItem["tone"] = "info",
+    durationMs = 3600
+  ) => {
+    const toastId = toastIdRef.current + 1;
+    toastIdRef.current = toastId;
+
+    setToasts((current) => [...current, { id: toastId, tone, message }].slice(-3));
+    const timeoutId = window.setTimeout(() => {
+      dismissToast(toastId);
+    }, durationMs);
+    toastTimeoutsRef.current.push(timeoutId);
   };
 
   const scheduleBillingRefresh = (delays: number[] = [1500, 4500]) => {
@@ -381,6 +409,24 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    if (!billingSuccess) {
+      return;
+    }
+
+    pushToast(billingSuccess, "success");
+    setBillingSuccess(null);
+  }, [billingSuccess]);
+
+  useEffect(() => {
+    if (!billingError) {
+      return;
+    }
+
+    pushToast(billingError, "error", 4200);
+    setBillingError(null);
+  }, [billingError]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const paymentState = params.get("payment");
     const paymentType = params.get("type");
@@ -394,13 +440,13 @@ export default function App() {
         const planName = purchasedPlan && purchasedPlan in PLAN_LABELS
           ? PLAN_LABELS[purchasedPlan as keyof typeof PLAN_LABELS]
           : "votre abonnement";
-        setBillingSuccess(`${planName} activé. Les crédits du cycle sont en cours de synchronisation.`);
+        setBillingSuccess(`${planName} activé.`);
         setPlanChangePreview(null);
         setActiveView("settings");
         scheduleBillingRefresh();
       } else if (paymentType === "topup") {
         const packName = TOP_UP_PACKS.find((pack) => pack.id === purchasedPack)?.name || "La recharge";
-        setBillingSuccess(`${packName} confirmée. Le solde est en cours de mise à jour.`);
+        setBillingSuccess(`${packName} confirmée.`);
         setActiveView("settings");
         scheduleBillingRefresh();
       }
@@ -418,7 +464,7 @@ export default function App() {
       const planName = upgradedPlan && upgradedPlan in PLAN_LABELS
         ? PLAN_LABELS[upgradedPlan as keyof typeof PLAN_LABELS]
         : "votre nouveau plan";
-      setBillingSuccess(`${planName} activé. Stripe a confirmé le prorata du mois en cours.`);
+      setBillingSuccess(`${planName} activé.`);
       setCancelConfirmationOpen(false);
       setPlanChangePreview(null);
       scheduleBillingRefresh();
@@ -428,14 +474,14 @@ export default function App() {
       const planName = upgradedPlan && upgradedPlan in PLAN_LABELS
         ? PLAN_LABELS[upgradedPlan as keyof typeof PLAN_LABELS]
         : "votre prochain plan";
-      setBillingSuccess(`${planName} est maintenant planifié pour la prochaine échéance Stripe.`);
+      setBillingSuccess(`${planName} planifié.`);
       setCancelConfirmationOpen(false);
       setPlanChangePreview(null);
       scheduleBillingRefresh();
       params.delete("billing");
       params.delete("plan");
     } else if (billingState === "canceled") {
-      setBillingSuccess("La résiliation est programmée. Votre abonnement reste actif jusqu'à la fin du cycle en cours.");
+      setBillingSuccess("Résiliation programmée.");
       setCancelConfirmationOpen(false);
       setPlanChangePreview(null);
       scheduleBillingRefresh();
@@ -489,6 +535,8 @@ export default function App() {
   useEffect(() => {
     return () => {
       clearBillingRefreshTimeouts();
+      toastTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      toastTimeoutsRef.current = [];
       if (wheelResetTimeoutRef.current) {
         window.clearTimeout(wheelResetTimeoutRef.current);
       }
@@ -1714,9 +1762,6 @@ export default function App() {
                         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
                           1 cr&eacute;dit = 1 demande compl&egrave;te. Les abonnements mensuels assurent le meilleur prix au cr&eacute;dit, et les recharges restent volontairement moins avantageuses.
                         </p>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-                          Les changements de plan et la gestion de facturation se confirment ensuite dans l&apos;espace <span className="text-slate-300">R&eacute;glages</span> ou directement dans Stripe selon le cas.
-                        </p>
                       </motion.section>
 
                       <motion.div
@@ -1819,11 +1864,9 @@ export default function App() {
                                   : isScheduledPlan
                                     ? "Déjà planifié"
                                     : isCheckoutLoading
-                                      ? "Redirection vers Stripe..."
+                                      ? "Ouverture..."
                                     : isPreviewLoading
-                                      ? isHigherPlan
-                                        ? "Calcul du prorata..."
-                                        : "Préparation..."
+                                      ? "Préparation..."
                                     : isPlanChangeLoading
                                       ? "Changement..."
                                       : isScheduledPlanChangeLoading
@@ -1843,18 +1886,8 @@ export default function App() {
                         className="glass rounded-2xl border border-white/6 p-5 text-center"
                       >
                         <p className="text-sm text-slate-400">
-                          Paiement s&eacute;curis&eacute; par <span className="font-medium text-white">Stripe</span>. Les abonnements alimentent automatiquement le solde &agrave; chaque cycle et les recharges restent moins rentables qu&apos;une mont&eacute;e de plan.
+                          Abonnements mensuels, recharges ponctuelles si besoin.
                         </p>
-                        {billingSuccess && (
-                          <p className="mt-3 text-sm text-emerald-300">
-                            {billingSuccess}
-                          </p>
-                        )}
-                        {billingError && (
-                          <p className="mt-3 text-sm text-amber-200">
-                            {billingError}
-                          </p>
-                        )}
                       </motion.div>
                     </motion.div>
                   ) : activeView === "settings" ? (
@@ -1900,7 +1933,7 @@ export default function App() {
                               </p>
                             ) : !hasManagedSubscription ? (
                               <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
-                                Le plan local est bien connu, mais l&apos;abonnement Stripe n&apos;a pas encore pu &ecirc;tre rattach&eacute; automatiquement. Si le paiement est tr&egrave;s r&eacute;cent, rechargez la page. Sinon, le rattachement a probablement &eacute;t&eacute fait sur un autre client Stripe li&eacute; &agrave; votre email et sera recherch&eacute; automatiquement apr&egrave;s red&eacute;ploiement.
+                                L&apos;abonnement est encore en cours de rattachement. Rechargez la page dans quelques instants.
                               </p>
                             ) : cancelAtPeriodEnd && managedPeriodEndLabel ? (
                               <p className="mt-2 max-w-2xl text-sm leading-6 text-rose-100/90">
@@ -1908,7 +1941,7 @@ export default function App() {
                               </p>
                             ) : scheduledPlanLabel && scheduledPlanEffectiveLabel ? (
                               <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
-                                Votre abonnement actuel reste actif jusqu&apos;au {scheduledPlanEffectiveLabel}. &Agrave; cette date, Stripe basculera automatiquement sur {scheduledPlanLabel} avec ses cr&eacute;dits et son tarif. Vous pouvez encore annuler ce changement avant qu&apos;il prenne effet.
+                                Votre plan actuel reste actif jusqu&apos;au {scheduledPlanEffectiveLabel}. Ensuite, vous passerez sur {scheduledPlanLabel}. Vous pouvez encore annuler ce changement.
                               </p>
                             ) : managedPeriodEndLabel ? (
                               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
@@ -1979,7 +2012,7 @@ export default function App() {
                                   : "bg-white/10 text-white hover:bg-white/15"
                               } disabled:bg-white/10 disabled:text-white/60`}
                             >
-                              {checkoutTargetId === "portal" ? "Redirection..." : "Paiement et factures"}
+                              {checkoutTargetId === "portal" ? "Ouverture..." : "Paiement et factures"}
                             </motion.button>
                             <motion.button
                               type="button"
@@ -2012,11 +2045,11 @@ export default function App() {
                                 </p>
                               ) : !hasManagedSubscription ? (
                                 <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/90">
-                                  Les changements immédiats restent indisponibles tant que l&apos;abonnement Stripe actif n&apos;est pas rattaché proprement.
+                                  Les changements de plan seront disponibles dès que l&apos;abonnement sera rattaché.
                                 </p>
                               ) : (
                                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                                  Un plan supérieur applique un prorata immédiat. Un plan inférieur est programmé pour la prochaine échéance sans quitter cette page.
+                                  Montez de plan tout de suite ou programmez un plan inférieur pour le mois prochain.
                                 </p>
                               )}
                             </div>
@@ -2087,9 +2120,7 @@ export default function App() {
                                       : isScheduledPlan
                                         ? "Déjà planifié"
                                         : isPreviewLoading
-                                          ? isHigherPlan
-                                            ? "Calcul du prorata..."
-                                            : "Préparation..."
+                                          ? "Préparation..."
                                         : isPlanChangeLoading
                                           ? "Changement..."
                                           : isScheduledPlanChangeLoading
@@ -2227,7 +2258,7 @@ export default function App() {
                                       </svg>
                                     )}
                                     {isTopUpLoading
-                                      ? "Redirection..."
+                                      ? "Ouverture..."
                                       : canBuyTopUp
                                         ? "Acheter des crédits"
                                         : "Solde positif"}
@@ -2246,15 +2277,9 @@ export default function App() {
                         transition={{ delay: 0.16 }}
                         className="glass rounded-2xl border border-white/6 p-5 text-center"
                       >
-                        {billingSuccess ? (
-                          <p className="text-sm text-emerald-300">{billingSuccess}</p>
-                        ) : billingError ? (
-                          <p className="text-sm text-amber-200">{billingError}</p>
-                        ) : (
-                          <p className="text-sm text-slate-400">
-                            Les opérations d&apos;abonnement passent par <span className="font-medium text-white">Stripe</span>. Les changements de plan supérieurs sont immédiats, les plans inférieurs et résiliations prennent effet à la fin de la période en cours.
-                          </p>
-                        )}
+                        <p className="text-sm text-slate-400">
+                          Tout se gère ici: plan, factures et résiliation.
+                        </p>
                       </motion.div>
                     </motion.div>
                   ) : activeView === "admin" && user?.role === "ADMIN" ? (
@@ -2336,8 +2361,8 @@ export default function App() {
               </h3>
               <p className="mt-3 text-sm leading-6 text-slate-300">
                 {planChangePreview.mode === "upgrade"
-                  ? "Le changement est immédiat. Stripe appliquera le prorata du cycle en cours, puis les prochains mois repartiront au tarif habituel."
-                  : "Votre plan actuel reste actif jusqu'à la prochaine échéance. Stripe basculera ensuite automatiquement sur cette offre, sans repasser par une page de paiement."}
+                  ? "Le changement est immédiat. Le montant affiché ci-dessous sera facturé aujourd'hui."
+                  : "Le changement prendra effet à votre prochaine échéance."}
               </p>
 
               <div className="mt-5 space-y-3">
@@ -2436,9 +2461,6 @@ export default function App() {
                 <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
                   Aucun nouveau prélèvement ne sera effectué après cette date, sauf si vous réactivez l&apos;abonnement avant l&apos;échéance.
                 </div>
-                <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
-                  Vos éventuels changements de plan différés n&apos;auront plus d&apos;effet si la résiliation Stripe est confirmée.
-                </div>
               </div>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -2467,6 +2489,44 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <div
+        aria-live="polite"
+        className="pointer-events-none fixed inset-x-4 top-20 z-[85] flex flex-col gap-3 sm:left-auto sm:right-6 sm:top-24 sm:max-w-sm"
+      >
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, y: -10, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.97 }}
+              transition={{ duration: 0.2, ease: smoothEase }}
+              className={`pointer-events-auto rounded-2xl border px-4 py-3 shadow-[0_18px_50px_rgba(6,10,20,0.28)] backdrop-blur-xl ${
+                toast.tone === "success"
+                  ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-50"
+                  : toast.tone === "error"
+                    ? "border-amber-300/20 bg-amber-400/10 text-amber-50"
+                    : "border-white/10 bg-slate-900/85 text-slate-100"
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <p className="flex-1 text-sm leading-6">{toast.message}</p>
+                <button
+                  type="button"
+                  onClick={() => dismissToast(toast.id)}
+                  className="rounded-full p-1 text-current/70 transition hover:bg-white/10 hover:text-current"
+                  aria-label="Fermer"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M6 6l8 8M14 6l-8 8" />
+                  </svg>
+                </button>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       {user && (
         <motion.nav
