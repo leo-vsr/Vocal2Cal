@@ -18,8 +18,8 @@ The runtime voice flow does **not** use the Web Speech API. The client records a
 
 Current default AI model configuration in the repository:
 
-- `GEMINI_PARSE_MODEL=gemini-3.1-flash-lite-preview`
-- `GEMINI_TRANSCRIBE_MODEL=gemini-3.1-flash-lite-preview`
+- `GEMINI_PARSE_MODEL=gemini-2.5-flash`
+- `GEMINI_TRANSCRIBE_MODEL=gemini-2.5-flash`
 - `GEMINI_MODEL` can still be used as a shared fallback
 
 ## Tech Stack

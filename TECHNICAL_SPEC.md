@@ -24,7 +24,7 @@ Vocal2Cal is a React + Express application that lets users dictate calendar requ
 | Database | PostgreSQL | Supabase-friendly setup with pooled runtime URL + direct CLI URL |
 | Auth | Passport Google OAuth 2.0 + `express-session` | Backed by a signed auth cookie for session recovery |
 | AI | Google Gemini `generateContent` | Used for both transcription and event extraction |
-| Current default models | `gemini-3.1-flash-lite-preview` | Default for both parsing and transcription unless overridden by env vars |
+| Current default models | `gemini-2.5-flash` | Default for both parsing and transcription unless overridden by env vars |
 | Billing | Stripe | Checkout, Billing Portal, subscription lifecycle, top-ups, webhooks |
 | Deployment | Vercel | `vercel.json` routes API to `api/vercel.ts` and serves the client build |
 

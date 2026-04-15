@@ -7,11 +7,11 @@ export interface ParsedEvent {
 }
 
 function getGeminiParseModel() {
-  return process.env.GEMINI_PARSE_MODEL || process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+  return process.env.GEMINI_PARSE_MODEL || process.env.GEMINI_MODEL || "gemini-2.5-flash";
 }
 
 function getGeminiTranscribeModel() {
-  return process.env.GEMINI_TRANSCRIBE_MODEL || process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+  return process.env.GEMINI_TRANSCRIBE_MODEL || process.env.GEMINI_MODEL || "gemini-2.5-flash";
 }
 
 function getGeminiApiKey() {
