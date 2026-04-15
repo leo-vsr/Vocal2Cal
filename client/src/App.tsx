@@ -5,45 +5,9 @@ import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { History } from "@/components/History";
 import { UsageBar } from "@/components/UsageBar";
 import { AdminPanel } from "@/components/AdminPanel";
-import type { SubscriptionManagementData, UsageData } from "@/types";
+import type { CreditTransaction, SubscriptionManagementData, UsageData } from "@/types";
 
 const smoothEase = [0.22, 1, 0.36, 1] as const;
-const dashboardHighlights = [
-  {
-    title: "Dictée naturelle",
-    value: "1 phrase",
-    description: "Décrivez plusieurs rendez-vous dans la même demande.",
-    icon: "M12 18h.01M8 21h8a2 2 0 002-2v-1.126a1 1 0 01.553-.894l3.618-1.809A2 2 0 0015 13.382V8.618a2 2 0 00-1.106-1.789l-3.618-1.809A1 1 0 019 4.126V3a2 2 0 00-2-2H5a2 2 0 00-2 2v1.126a1 1 0 01-.553.894l-.447.223A2 2 0 001 7.03v9.94a2 2 0 001.106 1.789l.447.223A1 1 0 013 19.874V21a2 2 0 002 2h2a2 2 0 002-2z",
-  },
-  {
-    title: "Ajout agenda",
-    value: "Google",
-    description: "Les événements créés partent directement dans votre calendrier principal.",
-    icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
-  },
-  {
-    title: "Traçabilité",
-    value: "Historique",
-    description: "Retrouvez vos dernières dictées et les créneaux générés juste à côté.",
-    icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
-  },
-];
-
-const dashboardSteps = [
-  {
-    title: "Dictez comme vous parlez",
-    description: "Exemple : réunion mardi 9h, dentiste jeudi 17h30.",
-  },
-  {
-    title: "Vérifiez la transcription",
-    description: "La phrase reconnue reste visible avant l'envoi.",
-  },
-  {
-    title: "Confirmez puis contrôlez l'historique",
-    description: "Le panneau de droite vous permet de revoir chaque événement créé.",
-  },
-];
-
 const landingExamples = [
   {
     id: "01",
@@ -83,6 +47,13 @@ const PLAN_TIERS = {
   STARTER: 1,
   PRO: 2,
   BUSINESS: 3,
+} as const;
+
+const PLAN_MONTHLY_CREDITS = {
+  FREE: 5,
+  STARTER: 60,
+  PRO: 180,
+  BUSINESS: 600,
 } as const;
 
 const PRICING_PLANS = [
@@ -209,6 +180,50 @@ function formatEuroCents(amount: number) {
     style: "currency",
     currency: "EUR",
   }).format(amount / 100);
+}
+
+function formatCompactDateTime(date: string | null) {
+  if (!date) {
+    return null;
+  }
+
+  return new Date(date).toLocaleString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDecimal(value: number, maximumFractionDigits = 1) {
+  return new Intl.NumberFormat("fr-FR", {
+    maximumFractionDigits,
+  }).format(value);
+}
+
+function formatSignedCredits(amount: number) {
+  return `${amount > 0 ? "+" : ""}${amount}`;
+}
+
+function getTransactionLabel(transaction: CreditTransaction) {
+  if (transaction.description) {
+    return transaction.description;
+  }
+
+  switch (transaction.type) {
+    case "SIGNUP_BONUS":
+      return "Crédits de bienvenue";
+    case "PURCHASE":
+      return "Achat de crédits";
+    case "USAGE":
+      return "Utilisation d'un crédit";
+    case "ADMIN_GRANT":
+      return "Ajustement manuel";
+    case "SUBSCRIPTION_RENEWAL":
+      return "Renouvellement mensuel";
+    default:
+      return "Mouvement de crédits";
+  }
 }
 
 interface PlanChangePreview {
@@ -338,6 +353,71 @@ export default function App() {
       : availableCredits <= 10
         ? "text-amber-200"
         : "text-cyan-100";
+  const usageStats = accountUsage?.usage;
+  const recentTransactions = accountUsage?.transactions.slice(0, 4) ?? [];
+  const latestTransaction = recentTransactions[0] ?? null;
+  const monthlyCreditBaseline =
+    PLAN_MONTHLY_CREDITS[activePlanId as keyof typeof PLAN_MONTHLY_CREDITS] ?? 0;
+  const creditProgressPercent = monthlyCreditBaseline > 0
+    ? Math.min(100, Math.round((availableCredits / monthlyCreditBaseline) * 100))
+    : 0;
+  const lowCreditWarning = hasPaidPlan
+    ? availableCredits <= Math.max(10, Math.ceil(monthlyCreditBaseline * 0.15))
+    : availableCredits <= 2;
+  const projectedCoverageDays = usageStats && usageStats.avgPerDay > 0
+    ? availableCredits > 0
+      ? Math.ceil(availableCredits / usageStats.avgPerDay)
+      : 0
+    : null;
+  const usageTrendLabel = !usageStats || usageStats.month === 0
+    ? "Aucune activité récente"
+    : usageStats.avgPerDay >= 5
+      ? "Rythme soutenu"
+      : usageStats.avgPerDay >= 2
+        ? "Rythme régulier"
+        : "Rythme léger";
+  const subscriptionSummary = !hasPaidPlan
+    ? "Offre Découverte active"
+    : cancelAtPeriodEnd && managedPeriodEndLabel
+      ? `Fin programmée le ${managedPeriodEndLabel}`
+      : scheduledPlanLabel && scheduledPlanEffectiveLabel
+        ? `${scheduledPlanLabel} prévu le ${scheduledPlanEffectiveLabel}`
+        : managedPeriodEndLabel
+          ? `Renouvellement le ${managedPeriodEndLabel}`
+          : "Abonnement actif";
+  const subscriptionDetail = !hasPaidPlan
+    ? "Passez sur un abonnement mensuel si vous avez besoin d'un volume régulier."
+    : cancelAtPeriodEnd
+      ? "Le plan reste actif jusqu'à l'échéance prévue."
+      : scheduledPlanLabel && scheduledPlanEffectiveLabel
+        ? `Votre plan actuel reste actif jusqu'au ${scheduledPlanEffectiveLabel}.`
+        : "Les crédits se rechargent automatiquement à chaque cycle.";
+  const dashboardStats = [
+    {
+      label: "Crédits disponibles",
+      value: `${availableCredits}`,
+      detail: lowCreditWarning ? "Réserve à surveiller" : "Stock actuel",
+      accentClass: creditAccentClass,
+    },
+    {
+      label: "Aujourd'hui",
+      value: `${usageStats?.today ?? 0}`,
+      detail: "demandes traitées",
+      accentClass: "text-white",
+    },
+    {
+      label: "7 jours",
+      value: `${usageStats?.week ?? 0}`,
+      detail: "demandes cumulées",
+      accentClass: "text-white",
+    },
+    {
+      label: "30 jours",
+      value: `${usageStats?.month ?? 0}`,
+      detail: usageTrendLabel,
+      accentClass: "text-white",
+    },
+  ];
 
   const clearBillingRefreshTimeouts = () => {
     billingRefreshTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -1368,8 +1448,8 @@ export default function App() {
 
                   {/* Phone */}
                   <motion.div
-                    initial={{ opacity: 0, y: 30, rotate: -3 }}
-                    whileInView={{ opacity: 1, y: 0, rotate: 0 }}
+                    initial={{ opacity: 0, y: 30 }}
+                    whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true, margin: "-60px" }}
                     transition={{ duration: 0.7, ease: smoothEase }}
                     className="relative w-full max-w-xs shrink-0"
@@ -1504,13 +1584,6 @@ export default function App() {
                   )}
                 </AnimatePresence>
 
-                <motion.p
-                  variants={fadeUp}
-                  className="text-center text-xs uppercase tracking-[0.24em] text-slate-500 sm:text-[11px]"
-                >
-                  Glissez horizontalement ou utilisez le trackpad pour changer de vue
-                </motion.p>
-
                 <motion.div
                   variants={fadeUp}
                   className="glass-strong hidden items-center gap-1 rounded-full border border-white/8 p-1 sm:inline-flex"
@@ -1622,10 +1695,10 @@ export default function App() {
                         <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                           <div>
                             <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-                              Dashboard Vocal2Cal
+                              Pilotage du compte
                             </h2>
-                            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                              Retrouvez vos dernières dictées, le suivi d&apos;usage et quelques repères utiles sans alourdir la page d&apos;accueil mobile.
+                            <p className="mt-2 text-sm leading-6 text-slate-400">
+                              Plan, consommation et mouvements récents au même endroit.
                             </p>
                           </div>
                           <motion.button
@@ -1648,29 +1721,24 @@ export default function App() {
                         initial="hidden"
                         animate="visible"
                         transition={{ delay: 0.08 }}
-                        className="grid gap-4 md:grid-cols-3"
+                        className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"
                       >
-                        {dashboardHighlights.map((item, index) => (
+                        {dashboardStats.map((item, index) => (
                           <motion.div
-                            key={item.title}
+                            key={item.label}
                             initial={{ opacity: 0, y: 18 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.12 + index * 0.06, duration: 0.3 }}
                             className="glass rounded-[24px] border border-white/6 p-5"
                           >
-                            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/16 to-cyan-400/10 text-blue-300">
-                              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d={item.icon} />
-                              </svg>
-                            </div>
-                            <p className="mt-4 text-xs uppercase tracking-[0.18em] text-slate-500">{item.title}</p>
-                            <p className="mt-2 text-2xl font-semibold tracking-tight text-white">{item.value}</p>
-                            <p className="mt-2 text-sm leading-6 text-slate-400">{item.description}</p>
+                            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{item.label}</p>
+                            <p className={`mt-3 text-3xl font-semibold tracking-tight ${item.accentClass}`}>{item.value}</p>
+                            <p className="mt-2 text-sm leading-6 text-slate-400">{item.detail}</p>
                           </motion.div>
                         ))}
                       </motion.section>
 
-                      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
                         <motion.section
                           variants={fadeUp}
                           initial="hidden"
@@ -1678,16 +1746,70 @@ export default function App() {
                           transition={{ delay: 0.12 }}
                           className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
                         >
-                          <div className="mb-4 flex items-center justify-between gap-4">
+                          <div className="mb-5 flex items-center justify-between gap-4">
                             <div>
-                              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Capacité du jour</p>
-                              <h3 className="mt-1 text-lg font-semibold text-white">Suivi d&apos;usage</h3>
+                              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Consommation</p>
+                              <h3 className="mt-1 text-lg font-semibold text-white">Capacité et rythme</h3>
                             </div>
-                            <div className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
-                              En direct
+                            {latestTransaction && (
+                              <div className="rounded-full border border-white/8 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-300">
+                                Dernier mouvement {formatCompactDateTime(latestTransaction.createdAt)}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
+                            <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.18em] text-slate-500">
+                              <span>Stock actuel</span>
+                              <span className={creditAccentClass}>{availableCredits} cr&eacute;dits</span>
+                            </div>
+                            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/8">
+                              <div
+                                className={`h-full rounded-full ${
+                                  lowCreditWarning ? "bg-amber-400" : "bg-cyan-400"
+                                }`}
+                                style={{ width: `${creditProgressPercent}%` }}
+                              />
+                            </div>
+                            <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+                              <span>Base du plan {monthlyCreditBaseline || 5} cr&eacute;dits</span>
+                              <span>{lowCreditWarning ? "À surveiller" : "Niveau confortable"}</span>
                             </div>
                           </div>
-                          <UsageBar refreshKey={usageRefresh} className="max-w-none" />
+
+                          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Moyenne / jour</p>
+                              <p className="mt-2 text-2xl font-semibold text-white">
+                                {formatDecimal(usageStats?.avgPerDay ?? 0)}
+                              </p>
+                              <p className="mt-2 text-sm text-slate-400">{usageTrendLabel}</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Couverture estimée</p>
+                              <p className="mt-2 text-2xl font-semibold text-white">
+                                {projectedCoverageDays === null
+                                  ? "—"
+                                  : projectedCoverageDays <= 1
+                                    ? `${projectedCoverageDays} jour`
+                                    : `${projectedCoverageDays} jours`}
+                              </p>
+                              <p className="mt-2 text-sm text-slate-400">
+                                Bas&eacute;e sur votre rythme actuel.
+                              </p>
+                            </div>
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Dernier mouvement</p>
+                              <p className="mt-2 text-base font-semibold text-white">
+                                {latestTransaction ? getTransactionLabel(latestTransaction) : "Aucun mouvement"}
+                              </p>
+                              <p className="mt-2 text-sm text-slate-400">
+                                {latestTransaction
+                                  ? `${formatSignedCredits(latestTransaction.amount)} cr\u00a0• solde ${latestTransaction.balance}`
+                                  : "Les prochains ajustements apparaîtront ici."}
+                              </p>
+                            </div>
+                          </div>
                         </motion.section>
 
                         <motion.section
@@ -1697,48 +1819,128 @@ export default function App() {
                           transition={{ delay: 0.16 }}
                           className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
                         >
-                          <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Rep&egrave;res</p>
-                          <h3 className="mt-1 text-lg font-semibold text-white">Cycle rapide</h3>
-                          <div className="mt-5 space-y-4">
-                            {dashboardSteps.map((step, index) => (
-                              <motion.div
-                                key={step.title}
-                                initial={{ opacity: 0, x: -8 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: 0.22 + index * 0.06, duration: 0.25 }}
-                                className="flex items-start gap-3"
-                              >
-                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/8 bg-white/[0.04] text-sm font-semibold text-blue-300">
-                                  {index + 1}
-                                </div>
-                                <div>
-                                  <p className="text-sm font-medium text-white">{step.title}</p>
-                                  <p className="mt-1 text-sm leading-6 text-slate-400">{step.description}</p>
-                                </div>
-                              </motion.div>
-                            ))}
+                          <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Abonnement</p>
+                          <h3 className="mt-1 text-lg font-semibold text-white">État actuel</h3>
+
+                          <div className="mt-5 space-y-3">
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Plan en cours</p>
+                              <p className="mt-2 text-2xl font-semibold text-white">{activePlanLabel}</p>
+                              <p className="mt-2 text-sm text-slate-400">{subscriptionSummary}</p>
+                            </div>
+
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Suivi</p>
+                              <p className="mt-2 text-sm leading-6 text-slate-300">{subscriptionDetail}</p>
+                            </div>
+
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Facturation</p>
+                              <p className="mt-2 text-sm leading-6 text-slate-300">
+                                {hasPaidPlan
+                                  ? managedPeriodEndLabel
+                                    ? `Échéance actuelle le ${managedPeriodEndLabel}.`
+                                    : "Cycle en cours."
+                                  : "Aucun abonnement actif."}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+                            <motion.button
+                              type="button"
+                              onClick={() => setActiveView(hasPaidPlan ? "settings" : "pricing")}
+                              whileHover={{ y: -2 }}
+                              whileTap={{ scale: 0.98 }}
+                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100"
+                            >
+                              {hasPaidPlan ? "Gérer l'abonnement" : "Voir les tarifs"}
+                            </motion.button>
+                            <motion.button
+                              type="button"
+                              onClick={() => setActiveView("home")}
+                              whileHover={{ y: -2 }}
+                              whileTap={{ scale: 0.98 }}
+                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-white/[0.06]"
+                            >
+                              Nouvelle dictée
+                            </motion.button>
                           </div>
                         </motion.section>
                       </div>
 
-                      <motion.section
-                        variants={fadeUp}
-                        initial="hidden"
-                        animate="visible"
-                        transition={{ delay: 0.2 }}
-                        className="glass-strong rounded-[30px] border border-white/8 p-5 sm:p-6"
-                      >
-                        <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Historique</p>
-                            <h3 className="mt-1 text-2xl font-semibold tracking-tight text-white">Derni&egrave;res dict&eacute;es</h3>
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+                        <motion.section
+                          variants={fadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: 0.2 }}
+                          className="glass rounded-[26px] border border-white/6 p-5 sm:p-6"
+                        >
+                          <div className="mb-5 flex items-end justify-between gap-3">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Crédits</p>
+                              <h3 className="mt-1 text-lg font-semibold text-white">Mouvements récents</h3>
+                            </div>
+                            {recentTransactions.length > 0 && (
+                              <div className="rounded-full border border-white/8 bg-white/[0.04] px-3 py-1 text-xs text-slate-300">
+                                {recentTransactions.length} entrées
+                              </div>
+                            )}
                           </div>
-                          <p className="max-w-md text-sm leading-6 text-slate-400">
-                            Le m&ecirc;me historique que sur l&apos;accueil, mais int&eacute;gr&eacute; &agrave; une vue de suivi plus large.
-                          </p>
-                        </div>
-                        <History />
-                      </motion.section>
+
+                          {recentTransactions.length === 0 ? (
+                            <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4 text-sm text-slate-400">
+                              Aucun mouvement récent pour le moment.
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {recentTransactions.map((transaction) => (
+                                <div
+                                  key={transaction.id}
+                                  className="rounded-2xl border border-white/6 bg-white/[0.03] p-4"
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-white">
+                                        {getTransactionLabel(transaction)}
+                                      </p>
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        {formatCompactDateTime(transaction.createdAt)}
+                                      </p>
+                                    </div>
+                                    <div className="text-right">
+                                      <p className={`text-sm font-semibold ${
+                                        transaction.amount > 0 ? "text-emerald-300" : "text-slate-200"
+                                      }`}
+                                      >
+                                        {formatSignedCredits(transaction.amount)} cr
+                                      </p>
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        Solde {transaction.balance}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </motion.section>
+
+                        <motion.section
+                          variants={fadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: 0.24 }}
+                          className="glass-strong rounded-[30px] border border-white/8 p-5 sm:p-6"
+                        >
+                          <div className="mb-5">
+                            <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Historique</p>
+                            <h3 className="mt-1 text-2xl font-semibold tracking-tight text-white">Dernières dictées</h3>
+                          </div>
+                          <History />
+                        </motion.section>
+                      </div>
                     </motion.div>
                   ) : activeView === "pricing" ? (
                     <motion.div
@@ -1878,17 +2080,6 @@ export default function App() {
                         })}
                       </motion.div>
 
-                      <motion.div
-                        variants={fadeUp}
-                        initial="hidden"
-                        animate="visible"
-                        transition={{ delay: 0.2 }}
-                        className="glass rounded-2xl border border-white/6 p-5 text-center"
-                      >
-                        <p className="text-sm text-slate-400">
-                          Abonnements mensuels, recharges ponctuelles si besoin.
-                        </p>
-                      </motion.div>
                     </motion.div>
                   ) : activeView === "settings" ? (
                     <motion.div
@@ -2270,17 +2461,6 @@ export default function App() {
                         </motion.section>
                       )}
 
-                      <motion.div
-                        variants={fadeUp}
-                        initial="hidden"
-                        animate="visible"
-                        transition={{ delay: 0.16 }}
-                        className="glass rounded-2xl border border-white/6 p-5 text-center"
-                      >
-                        <p className="text-sm text-slate-400">
-                          Tout se gère ici: plan, factures et résiliation.
-                        </p>
-                      </motion.div>
                     </motion.div>
                   ) : activeView === "admin" && user?.role === "ADMIN" ? (
                     <motion.div
@@ -2574,7 +2754,7 @@ export default function App() {
         transition={{ delay: 0.8, duration: 0.5 }}
         className="text-center py-5 text-xs text-slate-600/60"
       >
-        Vocal2Cal — Projet Ynov Web Full-Stack
+        Vocal2Cal — Planification vocale connectée à votre agenda
       </motion.footer>
     </div>
   );

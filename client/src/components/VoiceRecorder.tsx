@@ -269,7 +269,6 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
             className="relative flex items-center justify-center w-40 h-40 sm:w-48 sm:h-48"
             animate={{
               y: isListening ? [0, -8, 0] : [0, -10, 0],
-              rotate: isListening ? [0, 1.5, -1.5, 0] : [0, 2, -2, 0],
             }}
             transition={{
               duration: isListening ? 3.6 : 5.2,
@@ -318,7 +317,7 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
         <motion.button
           onClick={handleToggleRecording}
           disabled={isDisabled}
-          whileHover={!isDisabled ? { scale: 1.08, y: -8, rotate: -1.5 } : undefined}
+          whileHover={!isDisabled ? { scale: 1.08, y: -8 } : undefined}
           whileTap={!isDisabled ? { scale: 0.92 } : undefined}
           animate={
             isListening
@@ -341,9 +340,9 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
             {isListening ? (
               <motion.svg
                 key="stop"
-                initial={{ scale: 0, rotate: -90 }}
-                animate={{ scale: 1, rotate: 0 }}
-                exit={{ scale: 0, rotate: 90 }}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
                 transition={{ duration: 0.25 }}
                 className="h-10 w-10 text-white"
                 fill="currentColor"
@@ -354,9 +353,9 @@ export function VoiceRecorder({ onSuccess, isAdmin = false }: VoiceRecorderProps
             ) : (
               <motion.svg
                 key="mic"
-                initial={{ scale: 0, rotate: 90 }}
-                animate={{ scale: 1, rotate: 0 }}
-                exit={{ scale: 0, rotate: -90 }}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
                 transition={{ duration: 0.25 }}
                 className="h-10 w-10 text-white"
                 fill="currentColor"
