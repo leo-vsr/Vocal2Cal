@@ -2,199 +2,347 @@
 
 ## Goal
 
-A PWA that lets users dictate calendar events by voice. The app transcribes speech, uses AI to extract structured event data (title, date, time), and automatically creates events in Google Calendar. Deployed serverless on Vercel.
+Vocal2Cal is a React + Express application that lets users dictate calendar requests in French, transcribe them with Gemini, review the transcript, extract structured events with Gemini again, and create those events in Google Calendar.
 
-## Users
+## Product Scope
 
-Any Google account holder who wants a fast, hands-free way to add events to their calendar. The app supports multiple events in a single utterance (e.g. *"Meeting tomorrow at 10am and dentist on Tuesday at 4:30pm"*).
+- Browser-based audio capture
+- Server-side speech-to-text and event parsing
+- Google OAuth and Google Calendar creation
+- Credit-based usage with Stripe subscriptions and top-ups
+- Personal history and usage tracking
+- Admin overview for platform metrics and user management
 
 # Technical Stack
 
-## Frontend
-
-React 19, TypeScript, Vite, TailwindCSS 4.
-
-## Backend
-
-Node.js, Express, TypeScript, Prisma ORM.
-
-## Database
-
-PostgreSQL (Supabase): managed Postgres with connection pooling.
-
-## Auth
-
-Google OAuth 2.0 via Passport.js: delegated auth with Google Calendar API scope.
-
-## AI
-
-Gemini 2.5 Flash: multilingual NLP with native JSON output (`responseMimeType: "application/json"`).
-
-## DevOps
-
-Hosting: Vercel (serverless). Auto-deploy on push.
+| Area | Current choice | Notes |
+| --- | --- | --- |
+| Frontend | React 19 + TypeScript + Vite + Tailwind CSS 4 | UI, dashboard, pricing, settings, admin |
+| Motion/UI | Framer Motion | Used across the recorder, history, and dashboard transitions |
+| Backend | Express + TypeScript | Session-based API exposed under `/api/*` |
+| ORM | Prisma | PostgreSQL schema and generated client |
+| Database | PostgreSQL | Supabase-friendly setup with pooled runtime URL + direct CLI URL |
+| Auth | Passport Google OAuth 2.0 + `express-session` | Backed by a signed auth cookie for session recovery |
+| AI | Google Gemini `generateContent` | Used for both transcription and event extraction |
+| Current default models | `gemini-3.1-flash-lite-preview` | Default for both parsing and transcription unless overridden by env vars |
+| Billing | Stripe | Checkout, Billing Portal, subscription lifecycle, top-ups, webhooks |
+| Deployment | Vercel | `vercel.json` routes API to `api/vercel.ts` and serves the client build |
 
 # Core Features
 
 ## Authentication
 
-- Google OAuth 2.0 (SSO) via Passport.js
-- Session-based auth with `express-session`
-- Scopes: `openid`, `email`, `profile`, `calendar.events`
-- Automatic token refresh when expired
-- Session stored server-side, cookie sent to client (`httpOnly`, `secure` in production)
+- Google OAuth 2.0 login with scopes:
+  - `openid`
+  - `email`
+  - `profile`
+  - `https://www.googleapis.com/auth/calendar.events`
+- User profiles are upserted in Prisma on OAuth callback.
+- Access and refresh tokens are stored server-side in the `User` table.
+- The API uses `express-session`, but it also writes a signed `vocal2cal_auth` cookie so the user ID can be restored across requests and serverless invocations.
+- Google access tokens are refreshed on demand through `https://oauth2.googleapis.com/token`.
 
-## Voice Recognition
+## Voice Capture and Transcription
 
-- Web Speech API (Chromium browsers: Chrome, Edge)
-- Continuous listening in French (`fr-FR`)
-- Real-time transcript display
-- Start/stop toggle with visual feedback (pulse animation)
+- Runtime capture uses `navigator.mediaDevices.getUserMedia()` and `MediaRecorder`.
+- The client does **not** use the Web Speech API at runtime.
+- Supported recording flow:
+  1. Capture audio in the browser.
+  2. If the browser emits WebM, convert it to WAV in the client for Gemini compatibility.
+  3. Base64-encode the normalized audio.
+  4. Send it to `POST /api/transcribe-audio`.
+- The backend forwards the audio to Gemini with a transcription prompt and returns `{ transcript }`.
+- `transcribe-audio` currently accepts Gemini-compatible MIME types normalized to:
+  - `audio/ogg`
+  - `audio/mp3`
+  - `audio/wav`
+  - `audio/flac`
+  - `audio/aac`
+  - `audio/aiff`
+- The request is rejected above roughly `20 MB` of base64 payload.
 
-## AI Event Parsing
+## Event Parsing and Calendar Creation
 
-- Gemini 2.5 extracts structured events from natural language text
-- Supports multiple events in a single phrase
-- Context-aware: injects current date, day of week, and time into the prompt
-- Handles relative dates: "tomorrow", "next Monday", "in 3 days"
-- Default time (09:00) and duration (+1h) when not specified
-- Forced JSON output via `responseMimeType: "application/json"`
-- Output: JSON array of `{ title, date, startTime, endTime, description }`
+- After transcription, the user can edit the transcript before submission.
+- `POST /api/parse-events` sends plain text and browser timezone to the backend.
+- The backend injects current date and time context into the Gemini parsing prompt.
+- Gemini is asked to return raw JSON only, with:
+  - `title`
+  - `date`
+  - `startTime`
+  - `endTime`
+  - `description`
+- Relative time interpretation is prompt-driven, with defaults of:
+  - date: today when omitted
+  - time: `09:00` when omitted
+  - duration: `+1 hour` when omitted
+- Parsed events are inserted into the user's primary Google Calendar.
+- Successful requests are stored in `VoiceAction`.
+- One credit is deducted after successful event creation, and a `CreditTransaction` of type `USAGE` is written.
 
-## Google Calendar Integration
+## Credits, Plans, and Billing
 
-- Automatic event creation on the user's primary calendar
-- OAuth token refresh handling (transparent re-auth if token expired)
-- Each created event includes a direct link to Google Calendar
-- Timezone: automatically detected from the user's browser (`Intl.DateTimeFormat`), fallback to `Europe/Paris`
+- Users start on `FREE` with `5` credits by Prisma default.
+- Paid plans:
+  - `STARTER`: `60` credits / month
+  - `PRO`: `180` credits / month
+  - `BUSINESS`: `600` credits / month
+- Top-up packs:
+  - `BOOST_20`
+  - `BOOST_80`
+  - `BOOST_200`
+- Top-ups are restricted to active subscribers whose balance has reached `0`.
+- Billing behaviors implemented in the API:
+  - new subscription checkout
+  - top-up checkout
+  - live upgrade preview with Stripe proration preview
+  - immediate upgrades
+  - scheduled downgrades at period end
+  - cancel at period end
+  - resume a scheduled cancellation
+  - Stripe Billing Portal session
+- Stripe webhooks handle:
+  - `checkout.session.completed`
+  - `invoice.paid`
+  - `customer.subscription.updated`
+  - `customer.subscription.deleted`
 
-## Rate Limiting
+## History, Usage, and Admin
 
-- Configurable daily AI call limit (`DAILY_AI_LIMIT` env var, default: 50)
-- Global limit across all users (counted via `VoiceAction` records in DB)
-- Resets automatically at midnight
-- Returns HTTP 429 when limit reached
+- `/api/history` returns up to `20` recent actions for the current user.
+- In development, demo history rows are injected unless `ENABLE_DEV_HISTORY_MOCKS="false"`.
+- `/api/usage` returns:
+  - current credit balance
+  - current plan
+  - live subscription status summary
+  - usage counts for today, last 7 days, and last 30 days
+  - recent credit transactions
+- Admin-only routes expose:
+  - user list
+  - platform KPIs
+  - revenue estimates
+  - estimated AI costs
+  - manual credit grants
+  - role changes
 
-## History
+## PWA and Mobile Status
 
-- Last 20 voice actions stored per user
-- Each record contains the raw transcript and created events
-- Toggleable history panel in the UI
-
-## PWA
-
-- Installable on mobile (manifest + Service Worker)
-- Dark theme, mobile-first responsive design
-- Safe area support for iPhone X+
+- `client/index.html` links to `manifest.json` and mobile web app metadata.
+- Icons and a `sw.js` file are present in `client/public/`.
+- `sw.js` is **not** currently registered in `client/src/main.tsx`, so offline caching should be treated as inactive.
 
 # System Architecture
 
 ## Layers
 
-| Layer | Component | Responsibility |
+| Layer | Main files | Responsibility |
 | --- | --- | --- |
-| Presentation | React SPA (`client/`) | UI, voice capture, state management |
-| API | Express (`api/`) | Routing, sessions, auth middleware |
-| Business Logic | Handlers + `lib/` | AI parsing, Calendar API, rate limiting |
-| Persistence | Supabase (PostgreSQL) | Users, OAuth tokens, action history |
+| Presentation | `client/src/App.tsx`, `components/*` | Landing page, recorder, dashboard, pricing, settings, admin |
+| Voice capture | `client/src/hooks/useSpeechRecognition.ts` | Record audio, normalize formats, call transcription API |
+| API | `api/src/index.ts`, `routes/*` | Auth, voice flows, history, usage, Stripe, admin |
+| Integrations | `api/src/lib/gemini.ts`, `google.ts`, `stripe.ts` | Gemini, Google OAuth token refresh, Calendar, Stripe |
+| Persistence | `api/prisma/schema.prisma` | Users, actions, payments, credit ledger |
 
-## Main Flow (voice → calendar)
+## Main Voice Flow
 
-1. User speaks → **Web Speech API** transcribes to text
-2. Client sends `POST /api/parse-events` with transcript
-3. `requireAuth` middleware verifies session
-4. Daily AI usage limit checked against DB
-5. **Gemini 2.5 Flash** parses text → structured JSON events
-6. Google OAuth token refreshed if expired
-7. Events created via **Google Calendar API**
-8. Action saved to Supabase (`VoiceAction`)
-9. Response sent to client → events displayed with Calendar links
+1. The browser captures audio with `MediaRecorder`.
+2. The client optionally converts WebM to WAV.
+3. The client sends `audioBase64` + `mimeType` to `POST /api/transcribe-audio`.
+4. The backend calls Gemini transcription and returns `{ transcript }`.
+5. The user can edit the transcript in the UI.
+6. The client sends text + timezone to `POST /api/parse-events`.
+7. The backend checks:
+   - authentication
+   - available credits
+   - global `DAILY_AI_LIMIT`
+8. The backend calls Gemini parsing with JSON output.
+9. The backend refreshes the Google token if needed.
+10. Events are inserted into Google Calendar.
+11. The action is stored in `VoiceAction`.
+12. The user's credits are decremented and a `CreditTransaction` is recorded.
+13. The API returns created events and remaining credits.
 
-## Architectural Choices
+## Auth Flow
 
-- **TypeScript end-to-end**: shared interfaces (`ParsedEvent`, `CreatedEvent`, `User`) between client and server avoid contract drift.
-- **Supabase**: managed PostgreSQL with connection pooling (Session Pooler, port 6543) eliminates infrastructure management. No need for a separate connection pool like PgBouncer.
-- **Prisma ORM**: auto-generated TypeScript types from the schema ensure compile-time safety on all DB queries.
-- **Serverless (Vercel)**: the Express app is wrapped as a single serverless function (`api/vercel.ts`). Preview deployments are created automatically per PR. Scale to zero when idle.
-- **Gemini `responseMimeType`**: by forcing `application/json` at the model level, we avoid markdown fencing and malformed JSON. Combined with a low temperature (0.1), the output is deterministic and parseable.
-- **Session-based auth over JWT**: simpler for a server-rendered OAuth flow. The session is stored in memory (dev) or could be backed by a store (production). Cookie-based approach avoids token management on the client.
+1. `/api/auth/google` starts the OAuth flow.
+2. `/api/auth/google/callback` upserts the user and stores `req.session.userId`.
+3. The backend also writes the signed `vocal2cal_auth` cookie.
+4. Future requests can authenticate through either:
+   - `req.session.userId`
+   - the signed auth cookie rehydrated into the session
+5. `/api/auth/me` returns the frontend user payload including `role`, `credits`, and `plan`.
 
-# Data Model (Supabase / Prisma)
+## Billing Flow
 
-## Tables
+1. The client opens checkout via `/api/stripe/checkout`.
+2. Stripe Checkout handles either a subscription or a top-up payment.
+3. Webhooks persist `Payment` records and synchronize user credits and subscription metadata.
+4. The settings page uses `/api/stripe/subscription-state` to render the current subscription state.
+5. Upgrades are applied immediately; downgrades are scheduled with Stripe subscription schedules.
 
-### User
+# Data Model
 
-- id: String (cuid), primary key
-- googleId: String, unique — Google identifier
-- email: String?, Google profile email
-- name: String?, Google profile display name
-- image: String?, Google profile avatar URL
-- accessToken: Text?, OAuth access token (server-side only)
-- refreshToken: Text?, OAuth refresh token (server-side only)
-- tokenExpiry: DateTime?, auto-refreshed when expired
-- createdAt: DateTime
-- updatedAt: DateTime
+## Enums
 
-### VoiceAction
+- `Role`: `USER`, `ADMIN`
+- `Plan`: `FREE`, `STARTER`, `PRO`, `BUSINESS`
+- `TransactionType`: `SIGNUP_BONUS`, `PURCHASE`, `USAGE`, `ADMIN_GRANT`, `SUBSCRIPTION_RENEWAL`
+- `PaymentKind`: `SUBSCRIPTION`, `TOP_UP`
 
-- id: String (cuid), primary key
-- userId: String, FK → User.id (cascade delete)
-- rawText: Text, original transcript
-- events: Json, array of `{ title, date, startTime, endTime, description? }`
-- status: String, default: "success"
-- createdAt: DateTime
+## User
 
-## Relationships
+- Identity:
+  - `id`
+  - `name`
+  - `email`
+  - `image`
+  - `googleId`
+- Google auth:
+  - `accessToken`
+  - `refreshToken`
+  - `tokenExpiry`
+- Access and billing:
+  - `role`
+  - `credits`
+  - `plan`
+  - `stripeCustomerId`
+  - `stripeSubscriptionId`
+  - `subscriptionStatus`
+  - `subscriptionCurrentPeriodEnd`
+- Relations:
+  - `voiceActions`
+  - `payments`
+  - `creditTransactions`
 
-- User → VoiceAction: one-to-many (a user has many voice actions)
-- VoiceAction → User: many-to-one with cascade delete (deleting a user deletes all their actions)
+## VoiceAction
 
-# API Endpoints
+- `id`
+- `userId`
+- `rawText`
+- `events` (JSON)
+- `status`
+- `createdAt`
+
+Each row represents a successful text-to-calendar action stored in user history.
+
+## Payment
+
+- `id`
+- `userId`
+- `kind`
+- `stripeSessionId`
+- `stripePaymentId`
+- `stripeInvoiceId`
+- `stripeSubscriptionId`
+- `plan`
+- `amount`
+- `currency`
+- `creditsGranted`
+- `status`
+- `createdAt`
+
+## CreditTransaction
+
+- `id`
+- `userId`
+- `type`
+- `amount`
+- `balance`
+- `description`
+- `createdAt`
+
+This table is the audit trail for usage, purchases, renewals, and admin grants.
+
+# API Surface
+
+## Auth and User
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| GET | /api/auth/google | No | Initiates Google OAuth flow |
-| GET | /api/auth/google/callback | No | OAuth callback → session → redirect to client |
-| GET | /api/auth/me | Yes | Returns user profile or 401 |
-| POST | /api/auth/logout | Yes | Destroys session |
-| POST | /api/parse-events | Yes | Main endpoint: text → AI → Calendar events |
-| GET | /api/history | Yes | Last 20 voice actions for the user |
-| GET | /api/usage | Yes | `{ used, limit }` — daily AI usage counter |
-| GET | /api/health | No | Health check |
+| GET | `/api/auth/google` | No | Start Google OAuth |
+| GET | `/api/auth/google/callback` | No | Complete OAuth, create session, redirect to client |
+| GET | `/api/auth/me` | Yes | Return current user payload |
+| POST | `/api/auth/logout` | Yes | Clear cookies and destroy session |
 
-## Error Format
+## Voice, History, and Usage
 
-All errors follow a uniform format: `{ error: string }`.
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| POST | `/api/transcribe-audio` | Yes + credits | Audio upload to Gemini transcription |
+| POST | `/api/parse-events` | Yes + credits | Parse text, create Calendar events, deduct 1 credit on success |
+| GET | `/api/history` | Yes | Last 20 actions, optionally mixed with dev mocks |
+| GET | `/api/usage` | Yes | Credits, plan, subscription status, usage stats, transactions |
+| GET | `/api/health` | No | Health check |
 
-- 400: Missing input
-- 401: Not authenticated / `SESSION_EXPIRED` (triggers re-auth on client)
-- 422: No events detected in the phrase
-- 429: Daily AI limit reached
-- 500: Internal server error
+## Admin
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/admin/overview` | Admin | Dashboard payload with stats and users |
+| GET | `/api/admin/users` | Admin | User list |
+| GET | `/api/admin/stats` | Admin | Platform metrics only |
+| POST | `/api/admin/grant-credits` | Admin | Add credits to a user |
+| POST | `/api/admin/set-role` | Admin | Change `USER` / `ADMIN` role |
+
+## Stripe and Billing
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| POST | `/api/stripe/checkout` | Yes | Start subscription or top-up checkout |
+| POST | `/api/stripe/change-plan-preview` | Yes | Preview proration for an upgrade or prepare downgrade metadata |
+| POST | `/api/stripe/change-plan` | Yes | Apply an immediate upgrade |
+| GET | `/api/stripe/subscription-state` | Yes | Resolve live Stripe subscription state |
+| POST | `/api/stripe/schedule-plan-change` | Yes | Schedule downgrade at next billing cycle |
+| POST | `/api/stripe/clear-scheduled-plan-change` | Yes | Remove a pending scheduled downgrade |
+| POST | `/api/stripe/cancel-subscription` | Yes | Set `cancel_at_period_end=true` |
+| POST | `/api/stripe/resume-subscription` | Yes | Remove a pending cancellation |
+| POST | `/api/stripe/portal` | Yes | Open Stripe Billing Portal |
+| POST | `/api/stripe/webhook` | No, signature checked | Stripe webhook endpoint |
+| GET | `/api/stripe/plans` | No | Public pricing payload for plans and top-ups |
+
+## Error Semantics
+
+- `400`: invalid input, invalid plan, malformed request
+- `401`: not authenticated or `SESSION_EXPIRED`
+- `402`: `NO_CREDITS`
+- `403`: forbidden admin or billing rule violation
+- `404`: missing user or Stripe linkage
+- `409`: Stripe state conflict or invalid subscription state transition
+- `413`: audio payload too large
+- `415`: unsupported audio format
+- `422`: no events detected
+- `429`: global daily limit reached
+- `500`: integration or internal server failure
 
 # Frontend Architecture
 
-| Component / Hook | Role |
+| File / component | Role |
 | --- | --- |
-| `App.tsx` | Root layout, auth gate, orchestrates child components |
-| `VoiceRecorder` | Mic button + voice capture, calls `POST /api/parse-events` |
-| `EventCard` | Displays a created event with Google Calendar link |
-| `History` | Lists past actions from `/api/history` |
-| `UsageBar` | AI usage progress bar from `/api/usage` |
-| `useAuth()` | Auth lifecycle: check `/me`, signIn (redirect), signOut |
-| `useSpeechRecognition()` | Wraps Web Speech API (`fr-FR`), manages transcript |
+| `client/src/App.tsx` | Main shell with `home`, `dashboard`, `pricing`, `settings`, and `admin` views |
+| `client/src/components/VoiceRecorder.tsx` | Voice UI, transcript review, admin text-only mode, event creation |
+| `client/src/components/EventCard.tsx` | Event display and Google Calendar link rendering |
+| `client/src/components/History.tsx` | Lazy-loaded history panel |
+| `client/src/components/UsageBar.tsx` | Compact credit and usage summary |
+| `client/src/components/AdminPanel.tsx` | Admin dashboard |
+| `client/src/hooks/useAuth.ts` | Fetch current user, sign-in redirect, logout |
+| `client/src/hooks/useSpeechRecognition.ts` | Browser recording + transcription API wrapper |
+| `client/vite.config.ts` | `@` alias and `/api` proxy to `http://localhost:3001` in development |
 
-## Client-Server Communication
+## Frontend Notes
 
-- All API calls use `fetch` with `credentials: "include"` for cookie-based sessions
-- The Vite dev server proxies `/api/*` to `http://localhost:3001` in development
-- In production, Vercel routes handle `/api/*` → serverless function
-- Responses are parsed as text first, then `JSON.parse` with error fallback to handle malformed responses gracefully
+- Pricing labels are currently hardcoded in `App.tsx` for presentation, even though the API also exposes `/api/stripe/plans`.
+- Admin users can switch the recorder into a text-only mode that reuses the same backend parsing flow.
+- The recorder shows an editable transcript instead of streaming interim browser speech recognition results.
 
-# Team Delegation Guide
+# Configuration and Validation Notes
 
-- **Frontend dev**: owns `client/`. Consumes the API as documented above. No need to know about Gemini or Calendar internals.
-- **Backend dev**: owns `api/`. Implements the contracts from the Data Model and API sections. No need to know React or styling.
-- **DevOps**: owns `vercel.json` + environment variables + Supabase provisioning.
-- **AI / Prompt engineering**: owns the prompt in `lib/gemini.ts`. Can iterate independently as long as the `ParsedEvent` interface remains stable.
+- `DAILY_AI_LIMIT` is a **global** limit based on today's `VoiceAction` count, not a per-user quota.
+- Stripe is optional for core voice + calendar development, but required for billing features.
+- `ADMIN_EMAILS` is not used by the current runtime; admin rights are stored in the database.
+- There is no automated test suite yet. Use `npm run build` and manual smoke tests for:
+  - Google login
+  - audio transcription
+  - event creation
+  - history and usage
+  - pricing and subscription flows
+  - admin overview
