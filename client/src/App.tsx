@@ -1737,6 +1737,7 @@ export default function App() {
                           const isPlanChangeLoading = checkoutTargetId === `change:${plan.id}`;
                           const isScheduledPlanChangeLoading = checkoutTargetId === `schedule:${plan.id}`;
                           const isScheduledPlan = scheduledPlanId === plan.id;
+                          const usesManagedPlanFlow = isEffectivelySubscribed && (isHigherPlan || isLowerPlan);
                           const canModifyManagedPlan =
                             isEffectivelySubscribed &&
                             hasManagedSubscription &&
@@ -1746,7 +1747,7 @@ export default function App() {
                             isFreePlan ||
                             isCurrentDisplayedPlan ||
                             isScheduledPlan ||
-                            ((isHigherPlan || isLowerPlan) && !canModifyManagedPlan) ||
+                            (usesManagedPlanFlow && !canModifyManagedPlan) ||
                             checkoutTargetId !== null;
 
                           return (
