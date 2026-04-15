@@ -1,5 +1,7 @@
 # Vocal2Cal
 
+> **Tester l'application en ligne :** [https://vocal2-cal-ten.vercel.app/](https://vocal2-cal-ten.vercel.app/)
+
 Vocal2Cal turns spoken or dictated calendar requests into Google Calendar events. The browser records audio, the API transcribes it with Gemini, the user can review the transcript, and the backend creates the events in Google Calendar.
 
 ## Current Product Scope
