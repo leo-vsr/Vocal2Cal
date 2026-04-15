@@ -110,7 +110,6 @@ Vocal2Cal est une application React + Express qui permet de dicter des demandes 
 ## Historique, usage et administration
 
 - `/api/history` renvoie jusqu'a `20` actions recentes pour l'utilisateur courant.
-- En developpement, des lignes d'historique de demonstration sont injectees sauf si `ENABLE_DEV_HISTORY_MOCKS="false"`.
 - `/api/usage` renvoie :
   - le solde de credits
   - le plan courant

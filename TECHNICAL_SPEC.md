@@ -110,7 +110,6 @@ Vocal2Cal is a React + Express application that lets users dictate calendar requ
 ## History, Usage, and Admin
 
 - `/api/history` returns up to `20` recent actions for the current user.
-- In development, demo history rows are injected unless `ENABLE_DEV_HISTORY_MOCKS="false"`.
 - `/api/usage` returns:
   - current credit balance
   - current plan

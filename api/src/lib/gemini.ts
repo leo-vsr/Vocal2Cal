@@ -22,44 +22,80 @@ function getGeminiApiKey() {
   return process.env.GEMINI_API_KEY;
 }
 
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1500;
+
+function userFriendlyGeminiError(status: number): string {
+  switch (status) {
+    case 503:
+    case 429:
+      return "Le service IA est temporairement surchargé. Réessayez dans quelques secondes.";
+    case 400:
+      return "Requête invalide envoyée au service IA.";
+    case 401:
+    case 403:
+      return "Clé API Gemini invalide ou expirée. Contactez l'administrateur.";
+    case 404:
+      return "Modèle IA introuvable. Contactez l'administrateur.";
+    default:
+      return "Une erreur inattendue est survenue avec le service IA. Réessayez.";
+  }
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 503 || status === 429;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function generateTextFromGemini(
   model: string,
   parts: Array<Record<string, unknown>>,
   responseMimeType = "text/plain"
 ) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(getGeminiApiKey())}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts,
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 4096,
-          responseMimeType,
-        },
-      }),
-    }
-  );
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(getGeminiApiKey())}`;
+  const body = JSON.stringify({
+    contents: [{ role: "user", parts }],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 4096,
+      responseMimeType,
+    },
+  });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Erreur Gemini API: ${err}`);
+  let lastStatus = 0;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await sleep(RETRY_DELAY_MS * attempt);
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return (
+        data.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("")?.trim() ||
+        ""
+      );
+    }
+
+    lastStatus = response.status;
+    const errBody = await response.text();
+    console.error(`Gemini API error (attempt ${attempt + 1}/${MAX_RETRIES + 1}, status ${lastStatus}):`, errBody);
+
+    if (!isRetryableStatus(lastStatus)) {
+      throw new Error(userFriendlyGeminiError(lastStatus));
+    }
   }
 
-  const data = await response.json();
-  return (
-    data.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("")?.trim() ||
-    ""
-  );
+  throw new Error(userFriendlyGeminiError(lastStatus));
 }
 
 export async function parseEventsFromText(text: string, timezone?: string): Promise<ParsedEvent[]> {

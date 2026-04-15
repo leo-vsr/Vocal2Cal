@@ -9,16 +9,6 @@ const router = Router();
 
 // Limite globale d'appels IA par jour (tous utilisateurs confondus)
 const DAILY_LIMIT = parseInt(process.env.DAILY_AI_LIMIT || "50", 10);
-const INCLUDE_DEV_HISTORY_MOCKS = process.env.NODE_ENV !== "production" && process.env.ENABLE_DEV_HISTORY_MOCKS !== "false";
-
-interface DemoEvent {
-  title: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  description?: string;
-  htmlLink?: string;
-}
 
 function normalizeGeminiAudioMimeType(mimeType: string) {
   if (mimeType.startsWith("audio/ogg")) return "audio/ogg";
@@ -28,97 +18,6 @@ function normalizeGeminiAudioMimeType(mimeType: string) {
   if (mimeType.startsWith("audio/aac")) return "audio/aac";
   if (mimeType.startsWith("audio/aiff")) return "audio/aiff";
   return null;
-}
-
-function toIsoDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function addDays(baseDate: Date, days: number) {
-  const nextDate = new Date(baseDate);
-  nextDate.setDate(nextDate.getDate() + days);
-  return nextDate;
-}
-
-function getDemoHistory(userId: string) {
-  const now = new Date();
-  const tomorrow = addDays(now, 1);
-  const inFourDays = addDays(now, 4);
-  const inFiveDays = addDays(now, 5);
-  const nextWeek = addDays(now, 7);
-  const demoActions: Array<{
-    id: string;
-    userId: string;
-    rawText: string;
-    events: DemoEvent[];
-    status: string;
-    createdAt: Date;
-  }> = [
-    {
-      id: "demo-history-1",
-      userId,
-      rawText: "Démo : rendez-vous client demain à 09h30 puis point équipe à 14h.",
-      events: [
-        {
-          title: "Rendez-vous client Acme",
-          date: toIsoDate(tomorrow),
-          startTime: "09:30",
-          endTime: "10:30",
-          description: "Démo UI - faux rendez-vous pour tester l'historique.",
-        },
-        {
-          title: "Point équipe produit",
-          date: toIsoDate(tomorrow),
-          startTime: "14:00",
-          endTime: "14:45",
-          description: "Synchronisation hebdo avec l'équipe.",
-        },
-      ],
-      status: "success",
-      createdAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
-    },
-    {
-      id: "demo-history-2",
-      userId,
-      rawText: "Démo : dentiste vendredi à 11h et sport samedi à 18h30.",
-      events: [
-        {
-          title: "Dentiste",
-          date: toIsoDate(inFourDays),
-          startTime: "11:00",
-          endTime: "11:45",
-          description: "Contrôle annuel.",
-        },
-        {
-          title: "Séance de sport",
-          date: toIsoDate(inFiveDays),
-          startTime: "18:30",
-          endTime: "19:30",
-          description: "Créneau perso de démonstration.",
-        },
-      ],
-      status: "success",
-      createdAt: new Date(now.getTime() - 28 * 60 * 60 * 1000),
-    },
-    {
-      id: "demo-history-3",
-      userId,
-      rawText: "Démo : déjeuner avec Sarah lundi prochain à 12h15.",
-      events: [
-        {
-          title: "Déjeuner avec Sarah",
-          date: toIsoDate(nextWeek),
-          startTime: "12:15",
-          endTime: "13:30",
-          description: "Réservation au café du centre.",
-        },
-      ],
-      status: "success",
-      createdAt: new Date(now.getTime() - 52 * 60 * 60 * 1000),
-    },
-  ];
-
-  return demoActions;
 }
 
 // POST /api/transcribe-audio — Transcribe browser-recorded audio to text
@@ -268,11 +167,7 @@ router.get("/history", requireAuth, async (req: Request, res: Response) => {
     take: 20,
   });
 
-  const actions = INCLUDE_DEV_HISTORY_MOCKS
-    ? [...getDemoHistory(userId), ...storedActions]
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 20)
-    : storedActions;
+  const actions = storedActions;
 
   res.json({ actions });
 });

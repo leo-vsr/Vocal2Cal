@@ -82,6 +82,5 @@ Local URLs:
 
 ## Current Notes
 
-- `ENABLE_DEV_HISTORY_MOCKS=true` injects demo history entries in development.
 - PWA metadata is present (`manifest.json`, icons, `sw.js`), but `sw.js` is not currently registered in `client/src/main.tsx`, so offline caching is not active.
 - There is no automated test suite yet. Treat `npm run build` plus manual checks for auth, dictation, history, usage, billing, and admin as the minimum validation path.
